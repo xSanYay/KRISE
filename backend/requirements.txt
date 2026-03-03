@@ -1,0 +1,30 @@
+# FastAPI & Web
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+websockets==14.1
+python-multipart==0.0.18
+
+# AWS Bedrock
+boto3==1.36.14
+
+# Pydantic & Config
+pydantic==2.10.5
+pydantic-settings==2.7.1
+
+# Scraping
+playwright==1.49.1
+beautifulsoup4==4.12.3
+lxml==5.3.0
+
+# Web Search
+duckduckgo-search==7.3.2
+
+# HTTP
+httpx==0.28.1
+
+# Logging
+structlog==24.4.0
+
+# Utils
+python-dotenv==1.0.1
+uuid7==0.1.0
