@@ -52,7 +52,7 @@ class FlipkartScraper(BaseScraper):
                     logger.warning("flipkart_parse_item_failed", error=str(e))
                     continue
 
-            await asyncio.sleep(random.uniform(0.5, 1.5))
+            await asyncio.sleep(random.uniform(0.1, 0.3))
 
         except Exception as e:
             logger.error("flipkart_search_parse_failed", query=query, error=str(e))

@@ -70,10 +70,19 @@ class BrowserManager:
         )
         return context
 
-    async def get_page(self, url: str, wait_for: str = "networkidle") -> tuple[Page, BrowserContext]:
+    async def get_page(self, url: str) -> tuple[Page, BrowserContext]:
         """Open a page with anti-detection and return page + context."""
         context = await self.new_context()
         page = await context.new_page()
+
+        # Block unnecessary resources to speed up scraping
+        excluded_resource_types = ["image", "stylesheet", "font", "media", "other"]
+        await page.route(
+            "**/*",
+            lambda route: route.abort()
+            if route.request.resource_type in excluded_resource_types
+            else route.continue_()
+        )
 
         # Anti-detection script
         await page.add_init_script("""
@@ -82,9 +91,10 @@ class BrowserManager:
         """)
 
         try:
+            # wait_until="domcontentloaded" is faster than networkidle
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            # Wait a bit for dynamic content
-            await page.wait_for_timeout(2000)
+            # Wait a small bit for dynamic JS content to render
+            await page.wait_for_timeout(500)
         except Exception as e:
             logger.warning("page_load_warning", url=url, error=str(e))
 

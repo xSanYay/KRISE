@@ -1,13 +1,5 @@
 <template>
   <div class="swipe-deck" v-if="products.length > 0">
-    <div class="deck-header">
-      <h3 class="deck-title">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v3"/></svg>
-        Product Recommendations
-      </h3>
-      <span class="deck-count badge badge-primary">{{ products.length }} left</span>
-    </div>
-
     <div class="deck-container">
       <!-- Show top card -->
       <ProductCard
@@ -16,8 +8,8 @@
         @swipe="handleSwipe"
       />
 
-      <div v-if="products.length === 0" class="deck-empty glass">
-        <p>No more products — refine your search to see more!</p>
+      <div v-if="products.length === 0" class="deck-empty">
+        <p>You've reviewed all the recommendations.</p>
       </div>
     </div>
 
@@ -97,21 +89,6 @@ function cancelReason() {
   position: relative;
 }
 
-.deck-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border-color);
-}
-.deck-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 15px;
-  font-weight: 600;
-}
-
 .deck-container {
   flex: 1;
   display: flex;
@@ -125,6 +102,10 @@ function cancelReason() {
   padding: 40px;
   text-align: center;
   color: var(--text-secondary);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-lg);
+  margin: 20px;
+  width: 100%;
 }
 
 /* Reason picker overlay */
@@ -157,10 +138,13 @@ function cancelReason() {
   justify-content: flex-start;
   padding: 12px 16px;
   font-size: 14px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
 }
 .reason-btn:hover {
-  background: rgba(124, 58, 237, 0.1);
-  border-color: var(--accent-primary);
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  border-color: var(--text-primary);
 }
 
 .shortlist-indicator {

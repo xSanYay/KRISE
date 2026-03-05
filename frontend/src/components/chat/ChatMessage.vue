@@ -183,35 +183,37 @@ function submitWidget(value: string) {
   margin-right: auto;
 }
 .msg-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  background: var(--accent-gradient);
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--text-primary);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: white;
+  color: var(--bg-primary);
+
 }
 .msg-bubble {
-  padding: 12px 16px;
-  border-radius: 16px;
+  padding: 8px 16px;
+  border-radius: var(--radius-lg);
   max-width: 100%;
 }
 .msg-user .msg-bubble {
-  background: rgba(124, 58, 237, 0.15);
-  border: 1px solid rgba(124, 58, 237, 0.25);
+  background: #1A1A1A;
+  border: 1px solid var(--border-color);
   border-bottom-right-radius: 4px;
+  color: var(--text-primary);
 }
 .msg-agent .msg-bubble {
-  background: var(--bg-glass);
-  border: 1px solid var(--border-color);
-  border-bottom-left-radius: 4px;
+  background: transparent;
+  padding-left: 0;
+  border: none;
 }
 .msg-system .msg-bubble {
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  color: #fca5a5;
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #ef4444;
   font-size: 13px;
 }
 .msg-content {
@@ -248,10 +250,10 @@ function submitWidget(value: string) {
   margin-top: 12px;
 }
 .widget {
-  padding: 14px;
+  padding: 16px;
   border-radius: 12px;
-  background: rgba(124, 58, 237, 0.06);
-  border: 1px solid rgba(124, 58, 237, 0.15);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
 }
 .widget-label {
   display: block;
@@ -297,7 +299,7 @@ function submitWidget(value: string) {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: var(--accent-primary);
+  background: var(--text-primary);
   cursor: pointer;
   border: 2px solid white;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
@@ -315,18 +317,20 @@ function submitWidget(value: string) {
 }
 .budget-text-input {
   flex: 1;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: 0;
   padding: 8px 12px;
   color: var(--text-primary);
   font-size: 18px;
   font-weight: 700;
   font-family: 'Outfit', sans-serif;
   outline: none;
+  transition: border-color 0.2s;
 }
 .budget-text-input:focus {
-  border-color: var(--accent-primary);
+  border-bottom-color: var(--text-primary);
 }
 /* Hide number spinner arrows */
 .budget-text-input::-webkit-outer-spin-button,
@@ -355,20 +359,20 @@ function submitWidget(value: string) {
   gap: 4px;
   padding: 8px 16px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
+  background: transparent;
   border: 1px solid var(--border-color);
-  color: var(--text-primary);
+  color: var(--text-secondary);
   font-size: 13px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 .chip-btn:hover {
-  background: rgba(124, 58, 237, 0.15);
-  border-color: var(--accent-primary);
+  border-color: #555555;
+  color: var(--text-primary);
 }
 .chip-selected {
-  background: rgba(124, 58, 237, 0.25) !important;
-  border-color: var(--accent-primary) !important;
-  color: white;
+  background: var(--text-primary) !important;
+  border-color: var(--text-primary) !important;
+  color: var(--bg-primary);
 }
 </style>

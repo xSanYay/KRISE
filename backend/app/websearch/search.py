@@ -1,6 +1,7 @@
 """Web search using DuckDuckGo for sentiment gathering."""
 
 from __future__ import annotations
+import asyncio
 import structlog
 from typing import Any
 
@@ -26,7 +27,11 @@ class WebSearcher:
         all_results = []
         for query in queries:
             try:
-                results = list(self._ddgs.text(query, region="in-en", max_results=max_results))
+                # Wrap synchronous DDGS call in a thread to prevent event loop blocking
+                raw_results = await asyncio.to_thread(
+                    self._ddgs.text, query, region="in-en", max_results=max_results
+                )
+                results = list(raw_results)
                 for r in results:
                     all_results.append({
                         "title": r.get("title", ""),
@@ -44,11 +49,10 @@ class WebSearcher:
     async def search_products(self, query: str, max_results: int = 5) -> list[dict[str, Any]]:
         """Search for product listings."""
         try:
-            results = list(self._ddgs.text(
-                f"{query} buy India price",
-                region="in-en",
-                max_results=max_results,
-            ))
+            raw_results = await asyncio.to_thread(
+                self._ddgs.text, f"{query} buy India price", region="in-en", max_results=max_results
+            )
+            results = list(raw_results)
             return [
                 {
                     "title": r.get("title", ""),

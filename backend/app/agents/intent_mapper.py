@@ -73,35 +73,35 @@ class IntentMapperAgent:
         """Build IntentProfile from LLM JSON output, merging with existing if available."""
         # Parse technical requirements
         tech_reqs = []
-        for req in data.get("technical_requirements", []):
+        for req in (data.get("technical_requirements") or []):
             if isinstance(req, dict):
                 tech_reqs.append(TechnicalRequirement(
-                    name=req.get("name", ""),
+                    name=req.get("name") or "",
                     min_value=str(req.get("min_value", "")) if req.get("min_value") else None,
-                    weight=float(req.get("weight", 0.5)),
-                    required=bool(req.get("required", False)),
+                    weight=float(req.get("weight") or 0.5),
+                    required=bool(req.get("required") or False),
                 ))
 
         # Parse constraints
-        constraints_data = data.get("constraints", {})
+        constraints_data = data.get("constraints") or {}
         constraints = Constraint(
             budget_max=constraints_data.get("budget_max"),
             budget_flexible=constraints_data.get("budget_flexible", True),
-            brand_preferences=constraints_data.get("brand_preferences", []),
-            brand_aversions=constraints_data.get("brand_aversions", []),
+            brand_preferences=constraints_data.get("brand_preferences") or [],
+            brand_aversions=constraints_data.get("brand_aversions") or [],
         )
 
-        confidence = float(data.get("confidence_score", 0.5))
+        confidence = float(data.get("confidence_score") or 0.5)
 
         profile = IntentProfile(
-            primary_use_case=data.get("primary_use_case", "general"),
-            secondary_use_cases=data.get("secondary_use_cases", []),
-            product_category=data.get("product_category", ""),
+            primary_use_case=data.get("primary_use_case") or "general",
+            secondary_use_cases=data.get("secondary_use_cases") or [],
+            product_category=data.get("product_category") or "",
             technical_requirements=tech_reqs,
             constraints=constraints,
-            deal_breakers=data.get("deal_breakers", []),
-            nice_to_haves=data.get("nice_to_haves", []),
-            ambiguities=data.get("ambiguities", []),
+            deal_breakers=data.get("deal_breakers") or [],
+            nice_to_haves=data.get("nice_to_haves") or [],
+            ambiguities=data.get("ambiguities") or [],
             confidence_score=confidence,
             conviction_score=min(confidence, 0.6),  # Start lower than confidence
         )

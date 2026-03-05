@@ -46,8 +46,30 @@
           </div>
         </div>
 
-        <!-- Inline Swipe Deck in chat -->
-        <div v-if="sessionStore.hasProducts" class="inline-deck animate-fade-in">
+      </div>
+
+      <!-- Reshow Button (floats above chat messages when hidden) -->
+      <div v-if="sessionStore.hasProducts && isProductsHidden" class="reshow-products-bar animate-fade-in">
+        <button class="btn btn-primary shadow-glow" @click="isProductsHidden = false">
+          Resume Recommendations ({{ sessionStore.products.length }} left)
+        </button>
+      </div>
+
+      <!-- Full-panel Swipe Deck Overlay -->
+      <div v-if="sessionStore.hasProducts && !isProductsHidden" class="products-overlay animate-slide-up">
+        <div class="products-overlay-header">
+          <div style="display: flex; align-items: center; gap: 16px;">
+            <h2 class="overlay-title">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              Your Recommendations
+            </h2>
+            <span class="badge badge-primary">{{ sessionStore.products.length }} left</span>
+          </div>
+          <button class="btn btn-ghost close-overlay-btn" @click="isProductsHidden = true">
+            Back to Chat
+          </button>
+        </div>
+        <div class="products-overlay-content">
           <SwipeDeck
             :products="sessionStore.products"
             :shortlist-count="sessionStore.shortlist.length"
@@ -172,6 +194,15 @@ const sessionStore = useSessionStore()
 const messagesContainer = ref<HTMLElement | null>(null)
 const isMobile = ref(false)
 const showMobilePanel = ref(false)
+const isProductsHidden = ref(false)
+
+// Reset hidden state when new products arrive
+watch(
+  () => sessionStore.hasProducts,
+  (has) => {
+    if (has) isProductsHidden.value = false
+  }
+)
 
 onMounted(async () => {
   checkMobile()
@@ -283,27 +314,25 @@ watch(
 .typing-indicator {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 4px 0;
+  gap: 12px;
+  padding: 8px 0;
 }
 .typing-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  background: var(--accent-gradient);
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--text-primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--bg-primary);
 }
 .typing-dots {
   display: flex;
   gap: 4px;
-  padding: 12px 16px;
-  background: var(--bg-glass);
-  border: 1px solid var(--border-color);
+  padding: 8px 12px;
+  background: transparent;
   border-radius: 16px;
-  border-bottom-left-radius: 4px;
 }
 .dot {
   width: 6px;
@@ -313,15 +342,78 @@ watch(
   animation: typing-dot 1.2s infinite;
 }
 
-.inline-deck {
-  width: 100%;
-  aspect-ratio: 3/4;
-  max-height: 520px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
+/* Products Overlay (replaces inline deck) */
+.products-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(5, 5, 5, 0.85);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+}
+
+.products-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 32px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.overlay-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 20px;
+  font-weight: 600;
+  font-family: 'Outfit', sans-serif;
+  letter-spacing: -0.5px;
+  color: var(--text-primary);
+}
+
+.products-overlay-content {
+  flex: 1;
   overflow: hidden;
-  margin-top: 10px;
+  padding: 20px;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+}
+
+/* Ensure SwipeDeck inside overlay takes max space */
+.products-overlay-content :deep(.swipe-deck) {
+  width: 100%;
+  max-width: 600px;
+}
+
+.reshow-products-bar {
+  position: absolute;
+  bottom: 100px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.reshow-products-bar .btn {
+  pointer-events: auto;
+  box-shadow: 0 10px 40px -10px rgba(0,0,0,1);
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}
+
+.close-overlay-btn {
+  border: 1px solid var(--border-color);
+}
+.close-overlay-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 /* Search progress */
@@ -356,7 +448,7 @@ watch(
 }
 .search-progress-fill {
   height: 100%;
-  background: var(--accent-gradient);
+  background: var(--text-primary);
   width: 0%;
   animation: progress-fill 8s cubic-bezier(0.1, 0.7, 0.1, 1) forwards;
 }

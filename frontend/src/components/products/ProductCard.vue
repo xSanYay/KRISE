@@ -138,16 +138,17 @@ function formatCount(n: number): string {
   position: absolute;
   top: 12px;
   right: 12px;
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: var(--accent-gradient);
+  width: 44px;
+  height: 44px;
+  border-radius: 4px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   z-index: 2;
-  box-shadow: 0 4px 15px var(--accent-glow);
+  box-shadow: 0 4px 15px rgba(0,0,0,0.5);
 }
 .score-value {
   font-family: 'Outfit', sans-serif;
@@ -172,18 +173,18 @@ function formatCount(n: number): string {
 }
 
 .card-image {
-  height: 200px;
-  background: var(--bg-secondary);
+  height: 280px;
+  background: #FFFFFF;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  border-bottom: 1px solid var(--border-color);
 }
 .card-image img {
   max-height: 100%;
   max-width: 100%;
-  object-fit: contain;
-  padding: 12px;
+  object-fit: cover;
 }
 .img-placeholder {
   display: flex;
@@ -217,11 +218,10 @@ function formatCount(n: number): string {
 }
 .price-current {
   font-family: 'Outfit', sans-serif;
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 700;
-  background: var(--accent-gradient);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--text-primary);
+  letter-spacing: -1px;
 }
 .price-original {
   font-size: 14px;
@@ -270,7 +270,12 @@ function formatCount(n: number): string {
 }
 .score-row .progress-bar {
   flex: 1;
-  height: 4px;
+  height: 2px;
+  background: #333333;
+}
+.score-row .progress-bar .fill {
+  background: var(--text-primary);
+  height: 100%;
 }
 .score-num {
   font-size: 11px;
@@ -282,12 +287,11 @@ function formatCount(n: number): string {
 
 .card-explanation {
   font-size: 13px;
-  color: var(--accent-secondary);
+  color: var(--text-secondary);
   line-height: 1.5;
-  padding: 8px 12px;
-  background: rgba(6, 182, 212, 0.06);
-  border-radius: 8px;
-  border: 1px solid rgba(6, 182, 212, 0.15);
+  padding: 12px 0;
+  border-top: 1px dashed var(--border-color);
+  margin-top: 12px;
   margin-bottom: 10px;
 }
 
@@ -330,30 +334,34 @@ function formatCount(n: number): string {
   transition: all 0.2s;
 }
 .action-btn.reject {
-  border-color: rgba(239, 68, 68, 0.4);
-  color: #ef4444;
+  border-color: var(--border-color);
+  color: var(--text-primary);
 }
 .action-btn.reject:hover {
-  background: rgba(239, 68, 68, 0.1);
+  background: #ef4444;
   border-color: #ef4444;
-  transform: scale(1.1);
+  color: white;
+  transform: scale(1.05);
 }
 .action-btn.save {
-  border-color: rgba(245, 158, 11, 0.4);
-  color: #f59e0b;
+  border-color: var(--border-color);
+  color: var(--text-primary);
 }
 .action-btn.save:hover {
-  background: rgba(245, 158, 11, 0.1);
+  background: #f59e0b;
   border-color: #f59e0b;
-  transform: scale(1.1);
+  color: white;
+  transform: scale(1.05);
 }
 .action-btn.accept {
-  border-color: rgba(16, 185, 129, 0.4);
-  color: #10b981;
+  border-color: var(--text-primary);
+  color: var(--bg-primary);
+  background: var(--text-primary);
 }
 .action-btn.accept:hover {
-  background: rgba(16, 185, 129, 0.1);
+  background: #10b981;
   border-color: #10b981;
-  transform: scale(1.1);
+  color: white;
+  transform: scale(1.05);
 }
 </style>
