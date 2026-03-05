@@ -48,5 +48,7 @@ class Session(BaseModel):
     product_deck: list[ProductScore] = Field(default_factory=list)
     shortlist: list[str] = Field(default_factory=list)  # product IDs
     socratic_turn_count: int = 0
+    asked_pre_search_clarification: bool = False
+    progress_steps: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

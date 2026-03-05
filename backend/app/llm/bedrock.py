@@ -28,32 +28,28 @@ class BedrockProvider(LLMProvider):
         self._model_id = settings.bedrock_model_id
 
     def _invoke(self, prompt: str, system: str = "", max_tokens: int = 2048) -> str:
-        """Synchronous invoke (run in executor for async)."""
-        messages = [{"role": "user", "content": [{"type": "text", "text": prompt}]}]
-
-        body: dict[str, Any] = {
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": max_tokens,
+        """Synchronous invoke using Bedrock Converse API (cross-model compatible)."""
+        messages = [{"role": "user", "content": [{"text": prompt}]}]
+        
+        kwargs = {
+            "modelId": self._model_id,
             "messages": messages,
+            "inferenceConfig": {"maxTokens": max_tokens, "temperature": 0.7}
         }
+        
         if system:
-            body["system"] = [{"type": "text", "text": system}]
+            kwargs["system"] = [{"text": system}]
 
-        response = self._client.invoke_model(
-            modelId=self._model_id,
-            contentType="application/json",
-            accept="application/json",
-            body=json.dumps(body),
-        )
-
-        result = json.loads(response["body"].read())
-        text = result["content"][0]["text"]
+        response = self._client.converse(**kwargs)
+        
+        text = response['output']['message']['content'][0]['text']
+        usage = response.get('usage', {})
 
         logger.info(
             "bedrock_invoke",
             model=self._model_id,
-            input_tokens=result.get("usage", {}).get("input_tokens"),
-            output_tokens=result.get("usage", {}).get("output_tokens"),
+            input_tokens=usage.get("inputTokens"),
+            output_tokens=usage.get("outputTokens"),
         )
         return text
 

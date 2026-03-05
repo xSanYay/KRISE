@@ -60,12 +60,22 @@ export interface ProductScore {
     explanation: string
 }
 
+export interface WidgetRequest {
+    widget_type: string
+    label: string
+    options?: string[]
+    min_value?: number
+    max_value?: number
+    step?: number
+}
+
 export interface MessageResponse {
     type: 'question' | 'recommendations' | 'info' | 'error'
     content: string
     intent_profile: IntentProfile | null
     products: ProductScore[]
     conviction_score: number
+    widget?: WidgetRequest | null
 }
 
 export async function createSession(language: string = 'en'): Promise<SessionResponse> {

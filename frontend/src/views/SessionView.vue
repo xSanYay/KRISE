@@ -7,21 +7,64 @@
           v-for="(msg, i) in sessionStore.messages"
           :key="i"
           :msg="msg"
+          @widget-submit="handleWidgetSubmit"
         />
 
-        <!-- Typing indicator -->
-        <div v-if="sessionStore.isLoading" class="typing-indicator animate-fade-in">
-          <div class="typing-avatar">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-            </svg>
+        <!-- Loading Indicator -->
+        <div v-if="sessionStore.isLoading" class="typing-container animate-fade-in">
+          <div class="typing-indicator">
+            <div class="typing-avatar">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+              </svg>
+            </div>
+            <div class="typing-dots">
+              <span class="dot" style="animation-delay: 0s"></span>
+              <span class="dot" style="animation-delay: 0.2s"></span>
+              <span class="dot" style="animation-delay: 0.4s"></span>
+            </div>
           </div>
-          <div class="typing-dots">
-            <span class="dot" style="animation-delay: 0s"></span>
-            <span class="dot" style="animation-delay: 0.2s"></span>
-            <span class="dot" style="animation-delay: 0.4s"></span>
+          <!-- Progress steps stream -->
+          <div v-if="sessionStore.progressSteps.length > 0" class="search-progress">
+            <div class="search-progress-steps">
+              <div v-for="(step, i) in sessionStore.progressSteps" :key="i" class="step" :class="{ active: i === sessionStore.progressSteps.length - 1 }">
+                <span class="step-dot" :style="{ opacity: i === sessionStore.progressSteps.length - 1 ? 1 : 0.4 }"></span>
+                <span class="step-text">{{ step }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-else class="search-progress">
+            <div class="search-progress-steps">
+              <div class="step active" :key="'s1'">
+                <span class="step-dot"></span>
+                <span class="step-text">{{ progressLabel }}</span>
+              </div>
+            </div>
+            <div class="search-progress-bar">
+              <div class="search-progress-fill"></div>
+            </div>
           </div>
         </div>
+
+        <!-- Inline Swipe Deck in chat -->
+        <div v-if="sessionStore.hasProducts" class="inline-deck animate-fade-in">
+          <SwipeDeck
+            :products="sessionStore.products"
+            :shortlist-count="sessionStore.shortlist.length"
+            @swipe="handleProductSwipe"
+          />
+        </div>
+      </div>
+
+      <!-- Mobile toggle button -->
+      <div v-if="isMobile" class="mobile-toggle-bar glass">
+        <button class="btn btn-ghost" @click="showMobilePanel = !showMobilePanel">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="9 18 15 12 9 6" v-if="!showMobilePanel" />
+            <polyline points="15 18 9 12 15 6" v-else />
+          </svg>
+          {{ showMobilePanel ? 'Back to Chat' : (sessionStore.phase === 'PRODUCT_RECOMMENDATION' ? 'View Matches' : 'View Profile') }}
+        </button>
       </div>
 
       <ChatInput
@@ -31,19 +74,17 @@
       />
     </div>
 
-    <!-- Right panel: Products or Intent Profile -->
-    <div class="side-panel">
-      <!-- Products view -->
-      <template v-if="sessionStore.hasProducts">
-        <SwipeDeck
-          :products="sessionStore.products"
-          :shortlist-count="sessionStore.shortlist.length"
-          @swipe="handleProductSwipe"
-        />
-      </template>
+    <!-- Right Side: Intent Profile / Recommendations -->
+    <div class="side-panel" :class="{ 'mobile-open': showMobilePanel }">
+      <!-- Mobile Close Button -->
+      <div v-if="isMobile" style="padding: 16px; border-bottom: 1px solid var(--border-color); text-align: right;">
+        <button class="btn btn-ghost" @click="showMobilePanel = false">
+          Close
+        </button>
+      </div>
 
       <!-- Intent Profile view (during conversation) -->
-      <template v-else-if="sessionStore.intentProfile">
+      <template v-if="sessionStore.intentProfile">
         <div class="profile-panel">
           <div class="profile-header">
             <h3>
@@ -86,7 +127,7 @@
                 </div>
               </div>
               <p class="conviction-hint">
-                {{ sessionStore.convictionScore >= 0.8 ? '✅ Ready for recommendations!' : '💬 Keep chatting to build conviction' }}
+                {{ sessionStore.convictionScore >= 0.8 ? 'Ready for recommendations' : 'Keep chatting to build conviction' }}
               </p>
             </div>
 
@@ -118,20 +159,51 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, watch, ref } from 'vue'
+import { computed, nextTick, watch, ref, onMounted, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import ChatMessage from '@/components/chat/ChatMessage.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import SwipeDeck from '@/components/products/SwipeDeck.vue'
 
+const route = useRoute()
 const sessionStore = useSessionStore()
-const messagesContainer = ref<HTMLElement>()
+
+const messagesContainer = ref<HTMLElement | null>(null)
+const isMobile = ref(false)
+const showMobilePanel = ref(false)
+
+onMounted(async () => {
+  checkMobile()
+  window.addEventListener('resize', checkMobile)
+  
+  const id = route.params.id as string
+  if (id && id !== sessionStore.sessionId) {
+    await sessionStore.fetchSession(id)
+  }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', checkMobile)
+})
+
+function checkMobile() {
+  isMobile.value = window.innerWidth <= 860
+  if (!isMobile.value) {
+    showMobilePanel.value = false
+  }
+}
 
 const inputPlaceholder = computed(() => {
-  if (sessionStore.isLoading) return 'Krise is thinking...'
-  if (sessionStore.phase === 'socratic_friction') return 'Answer the question to build conviction...'
+  if (sessionStore.isLoading) return 'Processing...'
+  if (sessionStore.phase === 'socratic_friction') return 'Answer to continue...'
   if (sessionStore.hasProducts) return 'Ask about the recommendations...'
   return 'Describe what you want to achieve...'
+})
+
+const progressLabel = computed(() => {
+  if (sessionStore.convictionScore >= 0.7) return 'Searching products and building recommendations...'
+  return 'Understanding your needs...'
 })
 
 const convictionColor = computed(() => {
@@ -145,6 +217,10 @@ function handleSend(message: string) {
   sessionStore.sendMessage(message)
 }
 
+function handleWidgetSubmit(value: string) {
+  sessionStore.sendMessage(value)
+}
+
 function handleProductSwipe(productId: string, direction: string, reason?: string) {
   sessionStore.handleSwipe(productId, direction, reason)
 }
@@ -152,6 +228,18 @@ function handleProductSwipe(productId: string, direction: string, reason?: strin
 // Auto-scroll to bottom
 watch(
   () => sessionStore.messages.length,
+  () => {
+    nextTick(() => {
+      if (messagesContainer.value) {
+        messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+      }
+    })
+  }
+)
+
+// Also scroll when loading state changes
+watch(
+  () => sessionStore.isLoading,
   () => {
     nextTick(() => {
       if (messagesContainer.value) {
@@ -186,7 +274,12 @@ watch(
   gap: 12px;
 }
 
-/* Typing indicator */
+/* Loading / Progress */
+.typing-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .typing-indicator {
   display: flex;
   align-items: center;
@@ -218,6 +311,66 @@ watch(
   border-radius: 50%;
   background: var(--text-muted);
   animation: typing-dot 1.2s infinite;
+}
+
+.inline-deck {
+  width: 100%;
+  aspect-ratio: 3/4;
+  max-height: 520px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+/* Search progress */
+.search-progress {
+  margin-left: 42px;
+  max-width: 320px;
+}
+.search-progress-steps {
+  margin-bottom: 6px;
+}
+.step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  animation: pulse-dot 1s infinite alternate;
+}
+.step-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.search-progress-bar {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.search-progress-fill {
+  height: 100%;
+  background: var(--accent-gradient);
+  width: 0%;
+  animation: progress-fill 8s cubic-bezier(0.1, 0.7, 0.1, 1) forwards;
+}
+@keyframes progress-fill {
+  0% { width: 0%; }
+  20% { width: 15%; }
+  40% { width: 35%; }
+  60% { width: 55%; }
+  80% { width: 75%; }
+  100% { width: 95%; }
+}
+@keyframes pulse-dot {
+  0% { opacity: 0.4; transform: scale(0.8); }
+  100% { opacity: 1; transform: scale(1.2); }
 }
 
 /* Side panel */
@@ -359,16 +512,48 @@ watch(
   margin-top: 8px;
 }
 
+/* Mobile Toggle Button */
+.mobile-toggle-bar {
+  padding: 8px 16px;
+  display: flex;
+  justify-content: center;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.mobile-toggle-bar .btn {
+  width: 100%;
+  font-size: 13px;
+}
+
 /* Responsive */
 @media (max-width: 860px) {
   .session-view {
-    flex-direction: column;
+    position: relative;
+    flex-direction: row;
+  }
+  .chat-panel {
+    width: 100%;
+    height: 100%;
+    flex: 1;
+    border-right: none;
   }
   .side-panel {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: -100%;
     width: 100%;
-    max-height: 45vh;
-    border-right: none;
-    border-top: 1px solid var(--border-color);
+    max-width: none;
+    max-height: none;
+    background: var(--bg-primary);
+    z-index: 40;
+    transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: -10px 0 30px rgba(0,0,0,0.5);
+    border-left: 1px solid var(--border-color);
+  }
+  .side-panel.mobile-open {
+    right: 0;
   }
 }
 </style>

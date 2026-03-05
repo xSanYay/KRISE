@@ -15,7 +15,7 @@ from app.models.api import (
 from app.models.session import SwipeAction
 from app.storage.memory import create_session, get_session, update_session
 from app.agents.orchestrator import Orchestrator
-from app.llm.bedrock import BedrockProvider
+from app.config import get_settings
 
 router = APIRouter(prefix="/api/v1")
 
@@ -23,10 +23,23 @@ router = APIRouter(prefix="/api/v1")
 _orchestrator: Orchestrator | None = None
 
 
+def _make_llm():
+    settings = get_settings()
+    if settings.llm_provider == "bedrock":
+        from app.llm.bedrock import BedrockProvider
+        return BedrockProvider()
+    elif settings.llm_provider == "gemini":
+        from app.llm.gemini import GeminiProvider
+        return GeminiProvider()
+    else:
+        from app.llm.anthropic import AnthropicProvider
+        return AnthropicProvider()
+
+
 def _get_orchestrator() -> Orchestrator:
     global _orchestrator
     if _orchestrator is None:
-        _orchestrator = Orchestrator(BedrockProvider())
+        _orchestrator = Orchestrator(_make_llm())
     return _orchestrator
 
 
@@ -73,6 +86,7 @@ async def get_intent_profile(session_id: str):
         "intent_profile": session.intent_profile.model_dump(),
         "conviction_score": session.intent_profile.conviction_score,
         "socratic_turns": session.socratic_turn_count,
+        "progress_steps": session.progress_steps,
     }
 
 

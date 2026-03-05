@@ -1,4 +1,4 @@
-"""Flipkart scraper using Playwright."""
+"""Flipkart scraper using Playwright (reliable, anti-bot resistant)."""
 
 from __future__ import annotations
 import asyncio
@@ -14,7 +14,7 @@ logger = structlog.get_logger()
 
 
 class FlipkartScraper(BaseScraper):
-    """Scrapes product data from Flipkart."""
+    """Scrapes product data from Flipkart using Playwright."""
 
     BASE_URL = "https://www.flipkart.com"
 
@@ -36,10 +36,12 @@ class FlipkartScraper(BaseScraper):
                 await close_btn.click()
                 await page.wait_for_timeout(500)
 
-            # Find product cards — Flipkart uses dynamic class names, use multiple selectors
+            # Find product cards
             items = await page.query_selector_all('[data-id]')
             if not items:
-                items = await page.query_selector_all('div._1AtVbE')
+                items = await page.query_selector_all('div._1AtVbE, div.tUxRFH, div._75nlfW')
+
+            logger.info("flipkart_items_found", count=len(items), query=query)
 
             for item in items[:max_results]:
                 try:
@@ -50,7 +52,7 @@ class FlipkartScraper(BaseScraper):
                     logger.warning("flipkart_parse_item_failed", error=str(e))
                     continue
 
-            await asyncio.sleep(random.uniform(1.0, 2.0))
+            await asyncio.sleep(random.uniform(0.5, 1.5))
 
         except Exception as e:
             logger.error("flipkart_search_parse_failed", query=query, error=str(e))
@@ -62,9 +64,9 @@ class FlipkartScraper(BaseScraper):
 
     async def _parse_search_result(self, element) -> Product | None:
         """Parse a single Flipkart search result."""
-        # Try multiple selector patterns for title
+        # Title — try multiple known class patterns
         title = None
-        for selector in ["a.IRpwTa", "a.s1Q9rs", "div._4rR01T", "a.WKTcLC"]:
+        for selector in ["a.IRpwTa", "a.s1Q9rs", "div.KzDlHZ", "div._4rR01T", "a.WKTcLC", "a.CGtC98", "div.RfADtA"]:
             title_el = await element.query_selector(selector)
             if title_el:
                 title = (await title_el.inner_text()).strip()
@@ -85,7 +87,7 @@ class FlipkartScraper(BaseScraper):
 
         # Price
         price = 0
-        for selector in ["div._30jeq3", "div._25b18c"]:
+        for selector in ["div._30jeq3", "div._25b18c", "div.Nx9bqj"]:
             price_el = await element.query_selector(selector)
             if price_el:
                 price_text = (await price_el.inner_text()).replace("₹", "").replace(",", "").strip()
@@ -100,7 +102,7 @@ class FlipkartScraper(BaseScraper):
 
         # Original price
         original_price = None
-        orig_el = await element.query_selector("div._3I9_wc")
+        orig_el = await element.query_selector("div._3I9_wc, div.yRaY8j")
         if orig_el:
             orig_text = (await orig_el.inner_text()).replace("₹", "").replace(",", "").strip()
             try:
@@ -110,7 +112,7 @@ class FlipkartScraper(BaseScraper):
 
         # Rating
         rating = None
-        rating_el = await element.query_selector("div._3LWZlK")
+        rating_el = await element.query_selector("div._3LWZlK, div.XQDdHH")
         if rating_el:
             try:
                 rating = float((await rating_el.inner_text()).strip())
@@ -118,7 +120,7 @@ class FlipkartScraper(BaseScraper):
                 pass
 
         # Image
-        img_el = await element.query_selector("img._396cs4, img._2r_T1I")
+        img_el = await element.query_selector("img._396cs4, img._2r_T1I, img.DByuf4")
         image = await img_el.get_attribute("src") if img_el else ""
 
         discount = None
@@ -150,7 +152,6 @@ class FlipkartScraper(BaseScraper):
             return None
 
         try:
-            # Close popup
             close_btn = await page.query_selector('button._2KpZ6l._2doB4z')
             if close_btn:
                 await close_btn.click()
@@ -165,7 +166,6 @@ class FlipkartScraper(BaseScraper):
             except ValueError:
                 price = 0
 
-            # Specs
             specs = {}
             spec_rows = await page.query_selector_all("div._1UhVsV tr, div.X3BRps tr")
             for row in spec_rows[:20]:

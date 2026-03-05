@@ -18,12 +18,10 @@ logger = structlog.get_logger()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown lifecycle."""
-    # Startup
     logger.info("krise_engine_starting")
     await browser_manager.start()
     logger.info("krise_engine_ready")
     yield
-    # Shutdown
     logger.info("krise_engine_stopping")
     await browser_manager.stop()
     logger.info("krise_engine_stopped")
@@ -34,7 +32,7 @@ settings = get_settings()
 app = FastAPI(
     title="Krise Engine",
     description="Multi-Agent Intent Orchestrator for AI Commerce",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 

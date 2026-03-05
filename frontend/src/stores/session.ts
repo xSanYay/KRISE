@@ -8,6 +8,7 @@ import {
     type MessageResponse,
     type IntentProfile,
     type ProductScore,
+    getProfile as apiGetProfile,
 } from '@/lib/api'
 
 export interface ChatMessage {
@@ -15,6 +16,14 @@ export interface ChatMessage {
     content: string
     timestamp: number
     type?: string
+    widget?: {
+        widget_type: string
+        label: string
+        options?: string[]
+        min_value?: number
+        max_value?: number
+        step?: number
+    } | null
 }
 
 export const useSessionStore = defineStore('session', () => {
@@ -26,6 +35,7 @@ export const useSessionStore = defineStore('session', () => {
     const convictionScore = ref(0)
     const isLoading = ref(false)
     const shortlist = ref<string[]>([])
+    const progressSteps = ref<string[]>([])
 
     const hasProducts = computed(() => products.value.length > 0)
 
@@ -43,10 +53,11 @@ export const useSessionStore = defineStore('session', () => {
             // Welcome message
             messages.value.push({
                 role: 'agent',
-                content: "Hey! I'm Krise — your AI shopping advisor. Tell me what you want to **achieve**, not what product you want. For example: *\"I need a phone for outdoor photography\"* or *\"laptop for running SolidWorks on a budget\"*. What are you looking for?",
+                content: "I'm Krise, your AI shopping advisor. Tell me what you want to **achieve**, not what product you want. For example: *\"I need a phone for outdoor photography\"* or *\"laptop for running SolidWorks on a budget\"*.",
                 timestamp: Date.now(),
                 type: 'info',
             })
+            progressSteps.value = []
         } finally {
             isLoading.value = false
         }
@@ -63,15 +74,43 @@ export const useSessionStore = defineStore('session', () => {
         })
 
         isLoading.value = true
+        progressSteps.value = []
+
+        let profilePoll: number | null = null
+        if (phase.value === 'product_recommendation' || convictionScore.value >= 0.7) {
+            // Start polling for progress if we're generating products
+            profilePoll = window.setInterval(async () => {
+                if (!isLoading.value) {
+                    if (profilePoll) clearInterval(profilePoll)
+                    return
+                }
+                try {
+                    const profileRes = await apiGetProfile(sessionId.value!)
+                    if (profileRes.progress_steps) {
+                        progressSteps.value = profileRes.progress_steps
+                    }
+                } catch {
+                    // Ignore poll errors
+                }
+            }, 1000)
+        }
+
         try {
             const res: MessageResponse = await apiSendMessage(sessionId.value, content)
 
-            messages.value.push({
+            const msg: ChatMessage = {
                 role: 'agent',
                 content: res.content,
                 timestamp: Date.now(),
                 type: res.type,
-            })
+            }
+
+            // Attach widget if the backend sent one
+            if ((res as any).widget) {
+                msg.widget = (res as any).widget
+            }
+
+            messages.value.push(msg)
 
             if (res.intent_profile) {
                 intentProfile.value = res.intent_profile
@@ -84,6 +123,13 @@ export const useSessionStore = defineStore('session', () => {
             } else if (res.type === 'question') {
                 phase.value = 'socratic_friction'
             }
+
+            // Fetch final profile for progress if polled
+            try {
+                const finalProfile = await apiGetProfile(sessionId.value)
+                if (finalProfile.progress_steps) progressSteps.value = finalProfile.progress_steps
+            } catch { }
+
         } catch (err: any) {
             messages.value.push({
                 role: 'system',
@@ -93,6 +139,7 @@ export const useSessionStore = defineStore('session', () => {
             })
         } finally {
             isLoading.value = false
+            if (profilePoll) window.clearInterval(profilePoll)
         }
     }
 
@@ -106,10 +153,16 @@ export const useSessionStore = defineStore('session', () => {
         try {
             const res = await apiSwipe(sessionId.value, productId, direction, reason)
             // Remove swiped product
-            products.value = products.value.filter(p => p.product.id !== productId)
+            products.value = products.value.filter((p: ProductScore) => p.product.id !== productId)
 
-            if (res.next_product) {
-                // Re-sort might have changed
+            // If new products were fetched (deck refill), add them
+            if (res.remaining_count > products.value.length) {
+                // Server has more products; could refresh from API
+            }
+
+            // Check if deck is empty after swipe and all products consumed
+            if (products.value.length === 0) {
+                sendMessage("I've finished shortlisting the recommended products.")
             }
         } catch (err) {
             console.error('Swipe failed:', err)
@@ -126,6 +179,7 @@ export const useSessionStore = defineStore('session', () => {
         isLoading,
         shortlist,
         hasProducts,
+        progressSteps,
         startSession,
         sendMessage,
         handleSwipe,

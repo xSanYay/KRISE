@@ -1,4 +1,4 @@
-"""Amazon India scraper using Playwright."""
+"""Amazon India scraper using Playwright (reliable, anti-bot resistant)."""
 
 from __future__ import annotations
 import asyncio
@@ -14,13 +14,13 @@ logger = structlog.get_logger()
 
 
 class AmazonScraper(BaseScraper):
-    """Scrapes product data from Amazon India."""
+    """Scrapes product data from Amazon India using Playwright."""
 
     BASE_URL = "https://www.amazon.in"
 
     async def search(self, query: str, max_results: int = 10) -> list[Product]:
         """Search Amazon India for products."""
-        search_url = f"{self.BASE_URL}/s?k={query.replace(' ', '+')}"
+        search_url = f"{self.BASE_URL}/s?k={query.replace(' ', '+')}&ref=nb_sb_noss"
 
         try:
             page, context = await browser_manager.get_page(search_url)
@@ -30,10 +30,8 @@ class AmazonScraper(BaseScraper):
 
         products = []
         try:
-            # Wait for search results
-            await page.wait_for_selector('[data-component-type="s-search-result"]', timeout=10000)
-
             items = await page.query_selector_all('[data-component-type="s-search-result"]')
+            logger.info("amazon_items_found", count=len(items), query=query)
 
             for item in items[:max_results]:
                 try:
@@ -44,8 +42,7 @@ class AmazonScraper(BaseScraper):
                     logger.warning("amazon_parse_item_failed", error=str(e))
                     continue
 
-            # Random delay to avoid detection
-            await asyncio.sleep(random.uniform(1.0, 2.0))
+            await asyncio.sleep(random.uniform(0.5, 1.5))
 
         except Exception as e:
             logger.error("amazon_search_parse_failed", query=query, error=str(e))
@@ -57,56 +54,46 @@ class AmazonScraper(BaseScraper):
 
     async def _parse_search_result(self, element) -> Product | None:
         """Parse a single Amazon search result element."""
-        # Title
-        title_el = await element.query_selector("h2 a span")
+        # Title — use h2 which always contains the product name
+        title_el = await element.query_selector("h2")
         title = await title_el.inner_text() if title_el else None
         if not title:
             return None
 
         # URL
         link_el = await element.query_selector("h2 a")
-        href = await link_el.get_attribute("href") if link_el else ""
-        url = f"{self.BASE_URL}{href}" if href and not href.startswith("http") else href
+        href = await link_el.get_attribute("href") if link_el else None
+        url = f"{self.BASE_URL}{href}" if href else ""
 
-        # Price
+        # Current price
+        current_price = 0
         price_whole = await element.query_selector(".a-price-whole")
-        price_text = await price_whole.inner_text() if price_whole else "0"
-        price_text = price_text.replace(",", "").replace(".", "").strip()
-        try:
-            current_price = float(price_text) if price_text else 0
-        except ValueError:
-            current_price = 0
+        if price_whole:
+            price_text = await price_whole.inner_text()
+            price_text = price_text.replace(",", "").replace(".", "").strip()
+            try:
+                current_price = float(price_text)
+            except ValueError:
+                pass
 
         # Original price
-        original_el = await element.query_selector(".a-price.a-text-price .a-offscreen")
         original_price = None
-        if original_el:
-            orig_text = await original_el.inner_text()
-            orig_text = orig_text.replace("₹", "").replace(",", "").strip()
+        orig_el = await element.query_selector(".a-price.a-text-price .a-offscreen")
+        if orig_el:
+            orig_text = (await orig_el.inner_text()).replace("₹", "").replace(",", "").strip()
             try:
                 original_price = float(orig_text)
             except ValueError:
                 pass
 
         # Rating
-        rating_el = await element.query_selector(".a-icon-alt")
         rating = None
+        rating_el = await element.query_selector(".a-icon-alt")
         if rating_el:
-            rating_text = await rating_el.inner_text()
             try:
+                rating_text = await rating_el.inner_text()
                 rating = float(rating_text.split(" ")[0])
             except (ValueError, IndexError):
-                pass
-
-        # Review count
-        review_el = await element.query_selector('[aria-label*="ratings"]')
-        review_count = None
-        if review_el:
-            rc_text = await review_el.inner_text()
-            rc_text = rc_text.replace(",", "").strip()
-            try:
-                review_count = int(rc_text)
-            except ValueError:
                 pass
 
         # Image
@@ -122,7 +109,7 @@ class AmazonScraper(BaseScraper):
 
         return Product(
             id=str(uuid.uuid4()),
-            title=title,
+            title=title.strip(),
             brand=title.split(" ")[0] if title else "",
             price=PriceInfo(
                 current=current_price,
@@ -133,7 +120,6 @@ class AmazonScraper(BaseScraper):
             source="amazon",
             availability="in_stock",
             rating=rating,
-            review_count=review_count,
             images=[image] if image else [],
         )
 
@@ -149,7 +135,6 @@ class AmazonScraper(BaseScraper):
             title_el = await page.query_selector("#productTitle")
             title = (await title_el.inner_text()).strip() if title_el else "Unknown"
 
-            # Price
             price_el = await page.query_selector(".a-price-whole")
             price_text = (await price_el.inner_text()).replace(",", "").replace(".", "").strip() if price_el else "0"
             try:
@@ -157,15 +142,13 @@ class AmazonScraper(BaseScraper):
             except ValueError:
                 price = 0
 
-            # Specs table
             specs = {}
-            spec_rows = await page.query_selector_all("#productOverview_feature_div tr, #detailBullets_feature_div li")
+            spec_rows = await page.query_selector_all("#productOverview_feature_div tr")
             for row in spec_rows[:15]:
-                cells = await row.query_selector_all("td, span")
-                texts = [await c.inner_text() for c in cells]
-                if len(texts) >= 2:
-                    key = texts[0].strip().rstrip(":")
-                    val = texts[1].strip()
+                cells = await row.query_selector_all("td")
+                if len(cells) >= 2:
+                    key = (await cells[0].inner_text()).strip()
+                    val = (await cells[1].inner_text()).strip()
                     if key and val:
                         specs[key] = val
 

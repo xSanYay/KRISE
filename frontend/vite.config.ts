@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig({
+  clearScreen: false,
   plugins: [vue(), tailwindcss()],
   resolve: {
     alias: {
@@ -11,6 +12,9 @@ export default defineConfig({
     },
   },
   server: {
+    allowedHosts: [
+      '35ec-103-6-156-41.ngrok-free.app'
+    ],
     proxy: {
       '/api': {
         target: 'http://localhost:8000',

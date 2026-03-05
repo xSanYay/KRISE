@@ -17,7 +17,7 @@ logger = structlog.get_logger()
 
 
 class SocraticFrictionAgent:
-    """Generates devil's advocate questions to test user conviction."""
+    """Generates clarification questions to understand user needs."""
 
     def __init__(self, llm: LLMProvider):
         self._llm = llm
@@ -51,8 +51,7 @@ class SocraticFrictionAgent:
             requirements=reqs,
             ambiguities=ambiguities,
             conviction_score=f"{intent_profile.conviction_score:.2f}",
-            conversation_summary=summary,
-            turn_number=turn_number,
+            conversation_summary=summary
         )
 
         question = await self._llm.generate(prompt, system=SOCRATIC_QUESTION_SYSTEM, max_tokens=300)

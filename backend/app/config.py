@@ -11,11 +11,23 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
 
-    # AWS Bedrock
+    # LLM Provider: "anthropic" (API key), "bedrock" (AWS), or "gemini" (Google)
+    llm_provider: str = "bedrock"
+
+    # Anthropic API (direct)
+    anthropic_api_key: str = ""
+    anthropic_model_id: str = "claude-sonnet-4-20250514"
+
+    # AWS Bedrock (alternative)
     aws_access_key_id: str = ""
     aws_secret_access_key: str = ""
     aws_default_region: str = "us-east-1"
-    bedrock_model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    bedrock_model_id: str = "amazon.nova-lite-v1:0"
+    
+    # Google Gemini
+    gemini_api_key: str = ""
+    # "gemini-2.5-flash" or "gemini-1.5-flash" are fast and cheap
+    gemini_model_id: str = "gemini-2.5-flash"
 
     # CORS
     frontend_url: str = "http://localhost:5173"
@@ -29,7 +41,7 @@ class Settings(BaseSettings):
     conviction_threshold: float = 0.80
     max_socratic_turns: int = 5
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 @lru_cache

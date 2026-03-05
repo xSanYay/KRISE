@@ -8,17 +8,30 @@ from fastapi import WebSocket, WebSocketDisconnect
 from app.models.session import ConversationMessage, MessageRole, SwipeAction
 from app.storage.memory import get_session, update_session
 from app.agents.orchestrator import Orchestrator
-from app.llm.bedrock import BedrockProvider
+from app.config import get_settings
 
 logger = structlog.get_logger()
 
 _orchestrator: Orchestrator | None = None
 
 
+def _make_llm():
+    settings = get_settings()
+    if settings.llm_provider == "bedrock":
+        from app.llm.bedrock import BedrockProvider
+        return BedrockProvider()
+    elif settings.llm_provider == "gemini":
+        from app.llm.gemini import GeminiProvider
+        return GeminiProvider()
+    else:
+        from app.llm.anthropic import AnthropicProvider
+        return AnthropicProvider()
+
+
 def _get_orchestrator() -> Orchestrator:
     global _orchestrator
     if _orchestrator is None:
-        _orchestrator = Orchestrator(BedrockProvider())
+        _orchestrator = Orchestrator(_make_llm())
     return _orchestrator
 
 

@@ -39,15 +39,12 @@
     <!-- Floating cards -->
     <div class="floating-cards">
       <div class="float-card glass" style="--delay: 0s; --x: -20px">
-        <div class="float-card-emoji">🎯</div>
         <div class="float-card-text">Intent Mapping</div>
       </div>
       <div class="float-card glass" style="--delay: 1.5s; --x: 15px">
-        <div class="float-card-emoji">🤔</div>
-        <div class="float-card-text">Socratic Friction</div>
+        <div class="float-card-text">Clarification</div>
       </div>
       <div class="float-card glass" style="--delay: 3s; --x: -10px">
-        <div class="float-card-emoji">📊</div>
         <div class="float-card-text">Sentiment Auditing</div>
       </div>
     </div>
@@ -207,10 +204,36 @@ async function startNewSession() {
 .float-card:nth-child(1) { top: 15%; left: 8%; }
 .float-card:nth-child(2) { top: 25%; right: 6%; }
 .float-card:nth-child(3) { bottom: 20%; left: 12%; }
-.float-card-emoji { font-size: 20px; }
 .float-card-text { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
 
 @media (max-width: 768px) {
   .floating-cards { display: none; }
+  
+  .hero-title {
+    font-size: clamp(28px, 9vw, 42px);
+    line-height: 1.2;
+    margin-bottom: 16px;
+  }
+  
+  .hero-subtitle {
+    font-size: 15px;
+    padding: 0 10px;
+    margin-bottom: 24px;
+  }
+
+  .hero-features {
+    gap: 8px;
+    margin-bottom: 24px;
+  }
+
+  .feature-chip {
+    font-size: 12px;
+    padding: 5px 12px;
+  }
+
+  .btn-lg {
+    width: 100%;
+    max-width: 320px;
+  }
 }
 </style>

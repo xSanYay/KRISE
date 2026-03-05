@@ -112,6 +112,8 @@ class ScoringEngine:
         """Calculate value-for-money score (0-100)."""
         price = product.price.current
         budget = profile.constraints.budget_max
+        if budget is not None and 0 < budget < 1000:
+            budget *= 1000  # Handle '25k' parsed as 25
 
         if not budget:
             # No budget constraint — moderate VFM
@@ -158,6 +160,8 @@ class ScoringEngine:
         """Check if product hits any deal-breaker criteria."""
         price = product.price.current
         budget = profile.constraints.budget_max
+        if budget is not None and 0 < budget < 1000:
+            budget *= 1000  # Handle '25k' parsed as 25
 
         # Way over budget (>50% over)
         if budget and price > budget * 1.5:

@@ -33,12 +33,23 @@ class SessionResponse(BaseModel):
     phase: str
 
 
+class WidgetRequest(BaseModel):
+    """Request for the frontend to render an interactive widget."""
+    widget_type: str  # budget_slider, category_picker, brand_picker
+    label: str = ""
+    options: list[str] = Field(default_factory=list)
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+    step: Optional[float] = None
+
+
 class MessageResponse(BaseModel):
     type: str  # question, recommendations, info, error
     content: str = ""
     intent_profile: Optional[IntentProfile] = None
     products: list[ProductScore] = Field(default_factory=list)
     conviction_score: float = 0.0
+    widget: Optional[WidgetRequest] = None
 
 
 class SwipeResponse(BaseModel):

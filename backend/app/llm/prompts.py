@@ -3,7 +3,9 @@
 
 INTENT_EXTRACTION_SYSTEM = """You are an expert product consultant for the Indian market. \
 You help users find the perfect product by understanding their GOALS, not just their specifications. \
-Always think in terms of what the user wants to ACHIEVE, then translate that into technical requirements."""
+Always think in terms of what the user wants to ACHIEVE, then translate that into technical requirements. \
+When the user mentions budget amounts like "25k", interpret that as 25000 INR. \
+"1.5 lakh" = 150000 INR, "50k" = 50000 INR, etc."""
 
 INTENT_EXTRACTION_PROMPT = """A user is looking for a product. Analyze their message and extract a structured intent profile.
 
@@ -16,12 +18,12 @@ Extract the following and respond ONLY with valid JSON:
 {{
   "primary_use_case": "main purpose (e.g., gaming, photography, work, everyday_use)",
   "secondary_use_cases": ["list of secondary uses"],
-  "product_category": "phone | laptop | tablet | tv | appliance",
+  "product_category": "phone | laptop | tablet | tv | appliance | wearable | gaming",
   "technical_requirements": [
     {{"name": "spec_name", "min_value": "value_with_unit", "weight": 0.0-1.0, "required": true/false}}
   ],
   "constraints": {{
-    "budget_max": null_or_number_in_INR,
+    "budget_max": null_or_number_in_INR_ALWAYS_FULL_NUMBER,
     "budget_flexible": true/false,
     "brand_preferences": [],
     "brand_aversions": []
@@ -30,32 +32,35 @@ Extract the following and respond ONLY with valid JSON:
   "nice_to_haves": ["features that would be good but not essential"],
   "ambiguities": ["things that are unclear and need clarification"],
   "confidence_score": 0.0-1.0
-}}"""
+}}
+
+IMPORTANT: budget_max must ALWAYS be the full INR number. "25k" = 25000, "1.5 lakh" = 150000."""
 
 
-SOCRATIC_QUESTION_SYSTEM = """You are a Socratic product advisor. Your job is to CHALLENGE the user's assumptions \
-and help them make a well-considered purchase decision. You are NOT a salesperson — you are a devil's advocate. \
-Ask ONE focused question at a time. Be conversational, direct, and slightly provocative. \
-Use Indian context and pricing (INR). Keep responses under 2 sentences."""
+SOCRATIC_QUESTION_SYSTEM = """You are a product advisor helping users in India. \
+Ask ONE specific, practical question to understand what they need. \
+Do NOT ask vague or generic questions. Instead, ask about concrete details like: \
+specific use cases, screen size preference, battery expectations, camera needs, OS preference, etc. \
+Keep it under 2 sentences. Be direct and helpful."""
 
-SOCRATIC_QUESTION_PROMPT = """Given this user's intent profile, generate a Socratic friction question \
-to test their conviction and clarify ambiguities.
+SOCRATIC_QUESTION_PROMPT = """Based on the user's intent, ask ONE specific clarification question.
 
 Intent Profile:
 - Primary use case: {primary_use_case}
 - Product category: {product_category}
 - Budget: {budget}
 - Technical requirements: {requirements}
-- Ambiguities: {ambiguities}
+- Missing info (ambiguities): {ambiguities}
 - Current conviction score: {conviction_score}
 - Conversation so far: {conversation_summary}
-- Socratic turn number: {turn_number}
 
-Your question should:
-1. Challenge an assumption or validate a real need
-2. Help clarify one of the ambiguities if any exist
-3. Build toward a high-conviction purchase decision
-4. Be conversational and friendly, NOT interrogative
+Rules:
+1. Ask about ONE specific missing detail, not multiple things
+2. If budget is missing, ask directly "What's your budget range?"
+3. If category is vague, ask "Is this for a phone, laptop, or something else?"
+4. If use case is vague, ask about the specific activity (e.g., "Will this be used mainly for calling, social media, or gaming?")
+5. Do NOT repeat questions already asked in the conversation
+6. NEVER ask generic questions like "anything else?" or "any other preferences?"
 
 Respond with ONLY the question text. No preamble."""
 
@@ -147,16 +152,19 @@ Current conviction: {current_conviction}
 Current intent profile confidence: {confidence}
 
 Increase conviction if user:
-- Gives specific use cases (+0.1)
+- Gives specific use cases (+0.15)
 - Has done prior research (+0.15)
-- Answers friction questions confidently (+0.1)
+- Answers clarification questions with details (+0.15)
 - Has clear budget and priorities (+0.1)
+- Mentions specific brands or models (+0.1)
 
 Decrease conviction if user:
 - Uses vague terms like "best" or "latest" (-0.1)
 - Contradicts themselves (-0.15)
-- Is influenced by marketing buzzwords (-0.1)
-- Hesitates on questions (-0.1)
+- Says "I don't know" or similar (-0.05)
+
+IMPORTANT: Be generous with scores. If the user has stated a category, use case, and budget, score should be at least 0.7.
+If they additionally specify brands or technical needs, score 0.85+.
 
 Respond with ONLY a JSON object:
 {{"conviction_score": 0.0-1.0, "reasoning": "brief explanation"}}"""

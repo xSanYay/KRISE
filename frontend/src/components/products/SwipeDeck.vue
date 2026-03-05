@@ -27,7 +27,7 @@
         <h4>Why not this product?</h4>
         <div class="reason-options">
           <button v-for="r in reasons" :key="r.value" class="reason-btn btn btn-ghost" @click="submitReason(r.value)">
-            {{ r.emoji }} {{ r.label }}
+            {{ r.label }}
           </button>
         </div>
       </div>
@@ -60,11 +60,11 @@ const pendingSwipeId = ref('')
 const currentProduct = computed(() => props.products[0] || null)
 
 const reasons = [
-  { value: 'too_expensive', emoji: '💰', label: 'Too expensive' },
-  { value: 'wrong_brand', emoji: '🏷️', label: 'Wrong brand' },
-  { value: 'insufficient_specs', emoji: '⚙️', label: 'Insufficient specs' },
-  { value: 'poor_reviews', emoji: '👎', label: 'Poor reviews' },
-  { value: 'not_interested', emoji: '🤷', label: 'Just not interested' },
+  { value: 'too_expensive', label: 'Too expensive' },
+  { value: 'wrong_brand', label: 'Wrong brand' },
+  { value: 'insufficient_specs', label: 'Insufficient specs' },
+  { value: 'poor_reviews', label: 'Poor reviews' },
+  { value: 'not_interested', label: 'Just not interested' },
 ]
 
 function handleSwipe(direction: string) {
