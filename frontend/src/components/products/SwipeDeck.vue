@@ -48,6 +48,7 @@ const emit = defineEmits<{
 
 const showReasonPicker = ref(false)
 const pendingSwipeId = ref('')
+const reasonPromptCount = ref(0) // Track how many times reason modal has been shown
 
 const currentProduct = computed(() => props.products[0] || null)
 
@@ -63,9 +64,14 @@ function handleSwipe(direction: string) {
   if (!currentProduct.value) return
 
   if (direction === 'left') {
-    // Show reason picker for left swipes
-    pendingSwipeId.value = currentProduct.value.product.id
-    showReasonPicker.value = true
+    if (reasonPromptCount.value < 4) {
+      // Show reason picker for left swipes (up to 4 times)
+      pendingSwipeId.value = currentProduct.value.product.id
+      showReasonPicker.value = true
+    } else {
+      // Auto-skip reason after asking enough times
+      emit('swipe', currentProduct.value.product.id, 'left', 'not_interested')
+    }
   } else {
     emit('swipe', currentProduct.value.product.id, direction)
   }
@@ -73,10 +79,13 @@ function handleSwipe(direction: string) {
 
 function submitReason(reason: string) {
   emit('swipe', pendingSwipeId.value, 'left', reason)
+  reasonPromptCount.value++
   showReasonPicker.value = false
 }
 
 function cancelReason() {
+  emit('swipe', pendingSwipeId.value, 'left', 'not_interested')
+  reasonPromptCount.value++
   showReasonPicker.value = false
 }
 </script>

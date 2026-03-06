@@ -27,9 +27,10 @@ class WebSearcher:
         all_results = []
         for query in queries:
             try:
-                # Wrap synchronous DDGS call in a thread to prevent event loop blocking
-                raw_results = await asyncio.to_thread(
-                    self._ddgs.text, query, region="in-en", max_results=max_results
+                # Wrap synchronous DDGS call in a thread and enforce a strict timeout
+                raw_results = await asyncio.wait_for(
+                    asyncio.to_thread(self._ddgs.text, query, region="in-en", max_results=max_results),
+                    timeout=3.0
                 )
                 results = list(raw_results)
                 for r in results:
@@ -49,8 +50,9 @@ class WebSearcher:
     async def search_products(self, query: str, max_results: int = 5) -> list[dict[str, Any]]:
         """Search for product listings."""
         try:
-            raw_results = await asyncio.to_thread(
-                self._ddgs.text, f"{query} buy India price", region="in-en", max_results=max_results
+            raw_results = await asyncio.wait_for(
+                asyncio.to_thread(self._ddgs.text, f"{query} buy India price", region="in-en", max_results=max_results),
+                timeout=3.0
             )
             results = list(raw_results)
             return [

@@ -58,9 +58,9 @@ class ScraperAgent:
         # Deduplicate by title similarity
         unique_products = self._deduplicate(all_products)
 
-        # Fetch sentiment for top products
+        # Fetch sentiment for top products (limit to 5 for an optimized, curated list)
         sentiment_tasks = [
-            self._fetch_sentiment(p, intent_profile) for p in unique_products[:10]
+            self._fetch_sentiment(p, intent_profile) for p in unique_products[:5]
         ]
         products_with_sentiment = await asyncio.gather(*sentiment_tasks, return_exceptions=True)
 
