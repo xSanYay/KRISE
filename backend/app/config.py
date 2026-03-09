@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     # "gemini-2.5-flash" or "gemini-1.5-flash" are fast and cheap
     gemini_model_id: str = "gemini-2.5-flash"
+    # Small-talk / casual chat model (fastest/cheapest path)
+    gemini_small_talk_model_id: str = "gemini-3.1-flash-lite-preview"
+    gemini_small_talk_temperature: float = 0.4
+    gemini_small_talk_thinking_level: str = "MINIMAL"
+    gemini_enable_google_search: bool = False
+    small_talk_enabled: bool = True
+    small_talk_min_chars: int = 1
 
     # CORS
     frontend_url: str = "http://localhost:5173"
@@ -42,6 +49,9 @@ class Settings(BaseSettings):
     # Agent thresholds
     conviction_threshold: float = 0.80
     max_socratic_turns: int = 5
+    decision_max_turns: int = 10
+    decision_min_turns_before_conclusion: int = 3
+    decision_conclusion_threshold: float = 0.85
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

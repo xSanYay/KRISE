@@ -17,18 +17,39 @@ logger = structlog.get_logger()
 class GeminiProvider(LLMProvider):
     """Google Gemini API Provider."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        model_id: str | None = None,
+        temperature: float | None = None,
+        thinking_level: str | None = None,
+        enable_google_search: bool | None = None,
+    ):
         settings = get_settings()
         # Initialize client with API key explicitly (though it also reads GEMINI_API_KEY from env)
         self._client = genai.Client(api_key=settings.gemini_api_key)
-        self._model = settings.gemini_model_id
+        self._model = model_id or settings.gemini_model_id
+        self._temperature = 0.7 if temperature is None else temperature
+        self._thinking_level = thinking_level
+        self._enable_google_search = (
+            settings.gemini_enable_google_search if enable_google_search is None else enable_google_search
+        )
 
     def _invoke(self, prompt: str, system: str = "", max_tokens: int = 2048, response_mime_type: str = "text/plain") -> str:
+        thinking_config = None
+        if self._thinking_level:
+            thinking_config = types.ThinkingConfig(thinking_level=self._thinking_level)
+
+        tools = None
+        if self._enable_google_search:
+            tools = [types.Tool(googleSearch=types.GoogleSearch())]
+
         config = types.GenerateContentConfig(
             system_instruction=system if system else None,
             max_output_tokens=max_tokens,
             response_mime_type=response_mime_type,
-            temperature=0.7,
+            temperature=self._temperature,
+            thinking_config=thinking_config,
+            tools=tools,
         )
         response = self._client.models.generate_content(
             model=self._model,

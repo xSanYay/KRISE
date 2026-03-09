@@ -1,9 +1,11 @@
 """Agent Orchestrator — central coordinator managing the conversation flow."""
 
 from __future__ import annotations
+import re
 import structlog
 
 from app.llm.base import LLMProvider
+from app.llm.factory import make_small_talk_llm
 from app.agents.intent_mapper import IntentMapperAgent
 from app.agents.socratic import SocraticFrictionAgent
 from app.agents.scraper import ScraperAgent
@@ -20,6 +22,7 @@ class Orchestrator:
 
     def __init__(self, llm: LLMProvider):
         self._llm = llm
+        self._small_talk_llm: LLMProvider | None = None
         self._intent_mapper = IntentMapperAgent(llm)
         self._socratic = SocraticFrictionAgent(llm)
         self._scraper = ScraperAgent(llm)
@@ -40,6 +43,9 @@ class Orchestrator:
             conviction=session.intent_profile.conviction_score,
         )
 
+        if self._is_small_talk_message(message, session):
+            return await self._handle_small_talk(message, session)
+
         if session.mode == SessionMode.SOCRATIC_DECISION:
             return await self._handle_decision_mode(message, session)
 
@@ -49,6 +55,76 @@ class Orchestrator:
             return await self._handle_product_question(message, session)
         else:
             return MessageResponse(type="error", content="Unknown session phase.", mode=session.mode.value)
+
+    def _is_small_talk_message(self, message: str, session: Session) -> bool:
+        """Route casual chatter to a lightweight model without interrupting buying flows."""
+        if not self._settings.small_talk_enabled:
+            return False
+
+        if session.mode != SessionMode.STANDARD:
+            return False
+
+        text = (message or "").strip().lower()
+        if len(text) < self._settings.small_talk_min_chars:
+            return False
+
+        # If user has already moved into product recommendation, prefer contextual answers.
+        if session.phase == SessionPhase.PRODUCT_RECOMMENDATION:
+            return False
+
+        product_intent_pattern = (
+            r"\b(phone|laptop|tablet|tv|camera|headphone|earbuds|budget|under\s+\d|"
+            r"price|compare|spec|ram|storage|battery|search|recommend|buy)\b"
+        )
+        if re.search(product_intent_pattern, text):
+            return False
+
+        if len(text.split()) > 24:
+            return False
+
+        small_talk_patterns = [
+            r"^(hi|hello|hey|yo|namaste|hola)\b",
+            r"\b(how are you|how's it going|how do you do|what's up|whats up)\b",
+            r"\b(thanks|thank you|cool|awesome|nice|great)\b",
+            r"\b(tell me a joke|joke|fun fact|who are you|what can you do)\b",
+            r"\b(good morning|good afternoon|good evening|good night)\b",
+        ]
+        return any(re.search(pattern, text) for pattern in small_talk_patterns)
+
+    async def _handle_small_talk(self, message: str, session: Session) -> MessageResponse:
+        """Handle lightweight chatter with a dedicated low-cost Gemini model."""
+        if self._small_talk_llm is None:
+            self._small_talk_llm = make_small_talk_llm()
+
+        system = (
+            "You are a friendly assistant. Keep replies concise (1-3 short sentences), "
+            "helpful, and warm. If user asks product-research questions, ask them to share "
+            "category and budget in one sentence."
+        )
+
+        try:
+            if self._small_talk_llm is None:
+                raise RuntimeError("Small-talk model is unavailable")
+            response = await self._small_talk_llm.generate(message, system=system, max_tokens=180)
+        except Exception as exc:
+            logger.warning("small_talk_fallback", error=str(exc))
+            response = await self._llm.generate(message, system=system, max_tokens=180)
+
+        session.conversation_history.append(
+            ConversationMessage(
+                role=MessageRole.AGENT,
+                content=response,
+                metadata={"type": "small_talk"},
+            )
+        )
+
+        return MessageResponse(
+            type="info",
+            content=response,
+            intent_profile=session.intent_profile,
+            conviction_score=session.intent_profile.conviction_score,
+            mode=session.mode.value,
+        )
 
     async def _handle_conversation_phase(self, message: str, session: Session) -> MessageResponse:
         """Handle intent mapping and clarification phases."""
