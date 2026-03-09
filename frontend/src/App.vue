@@ -20,6 +20,6 @@ import AppHeader from './components/layout/AppHeader.vue'
 }
 .app-main {
   flex: 1;
-  overflow: hidden;
+  overflow: auto;
 }
 </style>

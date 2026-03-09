@@ -2,18 +2,7 @@
   <header class="app-header glass">
     <div class="header-inner">
       <router-link to="/" class="logo">
-        <div class="logo-icon">
-          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-            <rect width="28" height="28" rx="8" fill="url(#logo-grad)" />
-            <path d="M8 20V8l6 6 6-6v12" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-            <defs>
-              <linearGradient id="logo-grad" x1="0" y1="0" x2="28" y2="28">
-                <stop stop-color="#7c3aed" />
-                <stop offset="1" stop-color="#06b6d4" />
-              </linearGradient>
-            </defs>
-          </svg>
-        </div>
+        <img v-if="showLogo" class="logo-image" :src="logoSrc" alt="Krise logo" @error="handleLogoError" />
         <span class="logo-text">Krise</span>
         <span class="logo-badge">engine</span>
       </router-link>
@@ -29,10 +18,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useSessionStore } from '@/stores/session'
 
 const sessionStore = useSessionStore()
+const showLogo = ref(true)
+const logoSrc = '/logo.png'
 
 const convictionColor = computed(() => {
   const s = sessionStore.convictionScore
@@ -40,6 +31,10 @@ const convictionColor = computed(() => {
   if (s >= 0.5) return '#f59e0b'
   return '#ef4444'
 })
+
+function handleLogoError() {
+  showLogo.value = false
+}
 </script>
 
 <style scoped>
@@ -63,6 +58,12 @@ const convictionColor = computed(() => {
   gap: 10px;
   text-decoration: none;
   color: inherit;
+}
+.logo-image {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 .logo-text {
   font-family: 'Outfit', sans-serif;

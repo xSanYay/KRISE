@@ -1,9 +1,12 @@
 const API_BASE = '/api/v1'
 
+export type SessionMode = 'standard' | 'socratic_decision'
+
 export interface SessionResponse {
     session_id: string
     status: string
     phase: string
+    mode: SessionMode
 }
 
 export interface IntentProfile {
@@ -69,6 +72,14 @@ export interface WidgetRequest {
     step?: number
 }
 
+export interface DecisionOutcome {
+    verdict: 'Hard No' | 'Probably No' | 'Weak Yes' | 'Strong Yes'
+    rationale: string
+    recommendation: string
+    non_consumer_alternative: string
+    key_tradeoffs: string[]
+}
+
 export interface MessageResponse {
     type: 'question' | 'recommendations' | 'info' | 'error'
     content: string
@@ -76,13 +87,34 @@ export interface MessageResponse {
     products: ProductScore[]
     conviction_score: number
     widget?: WidgetRequest | null
+    mode: SessionMode
+    stage: string
+    turn: number
+    max_turns: number
+    completed: boolean
+    decision_outcome?: DecisionOutcome | null
 }
 
-export async function createSession(language: string = 'en'): Promise<SessionResponse> {
+export interface ProfileResponse {
+    session_id: string
+    mode: SessionMode
+    phase: string
+    initial_statement: string
+    intent_profile: IntentProfile
+    conviction_score: number
+    socratic_turns: number
+    decision_turns: number
+    decision_stage: string
+    decision_complete: boolean
+    decision_outcome?: DecisionOutcome | null
+    progress_steps: string[]
+}
+
+export async function createSession(language: string = 'en', mode: SessionMode = 'standard'): Promise<SessionResponse> {
     const res = await fetch(`${API_BASE}/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language }),
+        body: JSON.stringify({ language, mode }),
     })
     return res.json()
 }
@@ -117,5 +149,5 @@ export async function getProducts(sessionId: string) {
 
 export async function getProfile(sessionId: string) {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/profile`)
-    return res.json()
+    return res.json() as Promise<ProfileResponse>
 }
