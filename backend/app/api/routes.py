@@ -1,6 +1,7 @@
 """REST API routes."""
 
 from __future__ import annotations
+import structlog
 from fastapi import APIRouter, HTTPException
 
 from app.models.api import (
@@ -12,12 +13,13 @@ from app.models.api import (
     SwipeResponse,
     HealthResponse,
 )
-from app.models.session import SwipeAction
+from app.models.session import SessionMode, SwipeAction
 from app.storage.memory import create_session, get_session, update_session
 from app.agents.orchestrator import Orchestrator
 from app.config import get_settings
 
 router = APIRouter(prefix="/api/v1")
+logger = structlog.get_logger()
 
 # Lazy init — created on first use
 _orchestrator: Orchestrator | None = None
@@ -25,15 +27,37 @@ _orchestrator: Orchestrator | None = None
 
 def _make_llm():
     settings = get_settings()
-    if settings.llm_provider == "bedrock":
+    provider = settings.llm_provider.lower()
+
+    if provider == "auto":
+        if settings.aws_access_key_id and settings.aws_secret_access_key:
+            provider = "bedrock"
+        elif settings.gemini_api_key:
+            provider = "gemini"
+        elif settings.anthropic_api_key:
+            provider = "anthropic"
+        else:
+            raise RuntimeError(
+                "No LLM provider credentials are configured. Set AWS, GEMINI_API_KEY, or ANTHROPIC_API_KEY in the backend environment."
+            )
+
+    if provider == "bedrock":
+        if not (settings.aws_access_key_id and settings.aws_secret_access_key):
+            raise RuntimeError("Bedrock is selected but AWS credentials are missing.")
         from app.llm.bedrock import BedrockProvider
         return BedrockProvider()
-    elif settings.llm_provider == "gemini":
+    elif provider == "gemini":
+        if not settings.gemini_api_key:
+            raise RuntimeError("Gemini is selected but GEMINI_API_KEY is missing.")
         from app.llm.gemini import GeminiProvider
         return GeminiProvider()
-    else:
+    elif provider == "anthropic":
+        if not settings.anthropic_api_key:
+            raise RuntimeError("Anthropic is selected but ANTHROPIC_API_KEY is missing.")
         from app.llm.anthropic import AnthropicProvider
         return AnthropicProvider()
+
+    raise RuntimeError(f"Unsupported llm_provider: {settings.llm_provider}")
 
 
 def _get_orchestrator() -> Orchestrator:
@@ -51,11 +75,17 @@ async def health_check():
 @router.post("/sessions", response_model=SessionResponse)
 async def create_new_session(req: CreateSessionRequest):
     """Start a new conversation session."""
-    session = create_session(language=req.language)
+    try:
+        mode = SessionMode(req.mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid session mode") from exc
+
+    session = create_session(language=req.language, mode=mode)
     return SessionResponse(
         session_id=session.id,
         status="active",
         phase=session.phase.value,
+        mode=session.mode.value,
     )
 
 
@@ -66,8 +96,12 @@ async def send_message(session_id: str, req: SendMessageRequest):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    orchestrator = _get_orchestrator()
-    response = await orchestrator.process_message(req.content, session)
+    try:
+        orchestrator = _get_orchestrator()
+        response = await orchestrator.process_message(req.content, session)
+    except RuntimeError as exc:
+        logger.warning("llm_unavailable", error=str(exc))
+        return MessageResponse(type="error", content=str(exc))
 
     update_session(session)
     return response
@@ -82,10 +116,16 @@ async def get_intent_profile(session_id: str):
 
     return {
         "session_id": session_id,
+        "mode": session.mode.value,
         "phase": session.phase.value,
+        "initial_statement": session.initial_statement,
         "intent_profile": session.intent_profile.model_dump(),
         "conviction_score": session.intent_profile.conviction_score,
         "socratic_turns": session.socratic_turn_count,
+        "decision_turns": session.decision_turn_count,
+        "decision_stage": session.decision_stage,
+        "decision_complete": session.decision_complete,
+        "decision_outcome": session.decision_outcome.model_dump() if session.decision_outcome else None,
         "progress_steps": session.progress_steps,
     }
 
@@ -97,14 +137,19 @@ async def handle_swipe(session_id: str, req: SwipeRequest):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    orchestrator = _get_orchestrator()
-    swipe = SwipeAction(
-        product_id=req.product_id,
-        direction=req.direction,
-        reason=req.reason,
-    )
+    try:
+        orchestrator = _get_orchestrator()
+        swipe = SwipeAction(
+            product_id=req.product_id,
+            direction=req.direction,
+            reason=req.reason,
+        )
 
-    response = await orchestrator.handle_swipe(session, swipe)
+        response = await orchestrator.handle_swipe(session, swipe)
+    except RuntimeError as exc:
+        logger.warning("llm_unavailable", error=str(exc))
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     update_session(session)
     return response
 

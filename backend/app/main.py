@@ -19,7 +19,6 @@ logger = structlog.get_logger()
 async def lifespan(app: FastAPI):
     """Startup and shutdown lifecycle."""
     logger.info("krise_engine_starting")
-    await browser_manager.start()
     logger.info("krise_engine_ready")
     yield
     logger.info("krise_engine_stopping")
@@ -39,7 +38,8 @@ app = FastAPI(
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url, "http://localhost:5173", "http://localhost:3000"],
+    allow_origins=settings.get_cors_allow_origins(),
+    allow_origin_regex=settings.cors_allow_origin_regex or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

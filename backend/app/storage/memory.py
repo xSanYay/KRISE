@@ -4,16 +4,16 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from app.models.session import Session
+from app.models.session import Session, SessionMode
 
 # Simple dict store — replace with Redis/PostgreSQL in production
 _sessions: dict[str, Session] = {}
 
 
-def create_session(language: str = "en") -> Session:
+def create_session(language: str = "en", mode: SessionMode = SessionMode.STANDARD) -> Session:
     """Create a new session."""
     session_id = str(uuid.uuid4())
-    session = Session(id=session_id, language=language)
+    session = Session(id=session_id, language=language, mode=mode)
     _sessions[session_id] = session
     return session
 

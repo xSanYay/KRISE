@@ -11,8 +11,8 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
 
-    # LLM Provider: "anthropic" (API key), "bedrock" (AWS), or "gemini" (Google)
-    llm_provider: str = "bedrock"
+    # LLM Provider: "auto", "anthropic" (API key), "bedrock" (AWS), or "gemini" (Google)
+    llm_provider: str = "auto"
 
     # Anthropic API (direct)
     anthropic_api_key: str = ""
@@ -31,6 +31,8 @@ class Settings(BaseSettings):
 
     # CORS
     frontend_url: str = "http://localhost:5173"
+    cors_allow_origins: str = ""
+    cors_allow_origin_regex: str = ""
 
     # Scraping
     scraping_delay_min: float = 1.0
@@ -42,6 +44,17 @@ class Settings(BaseSettings):
     max_socratic_turns: int = 5
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+
+    def get_cors_allow_origins(self) -> list[str]:
+        origins = [origin.strip() for origin in self.cors_allow_origins.split(",") if origin.strip()]
+
+        if self.frontend_url and self.frontend_url not in origins:
+            origins.append(self.frontend_url)
+
+        if not origins:
+            origins = ["http://localhost:5173", "http://localhost:3000"]
+
+        return origins
 
 
 @lru_cache

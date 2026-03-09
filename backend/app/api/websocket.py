@@ -17,15 +17,37 @@ _orchestrator: Orchestrator | None = None
 
 def _make_llm():
     settings = get_settings()
-    if settings.llm_provider == "bedrock":
+    provider = settings.llm_provider.lower()
+
+    if provider == "auto":
+        if settings.aws_access_key_id and settings.aws_secret_access_key:
+            provider = "bedrock"
+        elif settings.gemini_api_key:
+            provider = "gemini"
+        elif settings.anthropic_api_key:
+            provider = "anthropic"
+        else:
+            raise RuntimeError(
+                "No LLM provider credentials are configured. Set AWS, GEMINI_API_KEY, or ANTHROPIC_API_KEY in the backend environment."
+            )
+
+    if provider == "bedrock":
+        if not (settings.aws_access_key_id and settings.aws_secret_access_key):
+            raise RuntimeError("Bedrock is selected but AWS credentials are missing.")
         from app.llm.bedrock import BedrockProvider
         return BedrockProvider()
-    elif settings.llm_provider == "gemini":
+    elif provider == "gemini":
+        if not settings.gemini_api_key:
+            raise RuntimeError("Gemini is selected but GEMINI_API_KEY is missing.")
         from app.llm.gemini import GeminiProvider
         return GeminiProvider()
-    else:
+    elif provider == "anthropic":
+        if not settings.anthropic_api_key:
+            raise RuntimeError("Anthropic is selected but ANTHROPIC_API_KEY is missing.")
         from app.llm.anthropic import AnthropicProvider
         return AnthropicProvider()
+
+    raise RuntimeError(f"Unsupported llm_provider: {settings.llm_provider}")
 
 
 def _get_orchestrator() -> Orchestrator:

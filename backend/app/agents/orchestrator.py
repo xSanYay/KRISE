@@ -8,7 +8,7 @@ from app.agents.intent_mapper import IntentMapperAgent
 from app.agents.socratic import SocraticFrictionAgent
 from app.agents.scraper import ScraperAgent
 from app.scoring.engine import ScoringEngine
-from app.models.session import Session, SessionPhase, ConversationMessage, MessageRole, SwipeAction
+from app.models.session import Session, SessionMode, SessionPhase, ConversationMessage, MessageRole, SwipeAction
 from app.models.api import MessageResponse, SwipeResponse, WidgetRequest
 from app.config import get_settings
 
@@ -35,16 +35,20 @@ class Orchestrator:
         logger.info(
             "processing_message",
             session_id=session.id,
+            mode=session.mode.value,
             phase=session.phase.value,
             conviction=session.intent_profile.conviction_score,
         )
+
+        if session.mode == SessionMode.SOCRATIC_DECISION:
+            return await self._handle_decision_mode(message, session)
 
         if session.phase in (SessionPhase.INTENT_MAPPING, SessionPhase.SOCRATIC_FRICTION):
             return await self._handle_conversation_phase(message, session)
         elif session.phase == SessionPhase.PRODUCT_RECOMMENDATION:
             return await self._handle_product_question(message, session)
         else:
-            return MessageResponse(type="error", content="Unknown session phase.")
+            return MessageResponse(type="error", content="Unknown session phase.", mode=session.mode.value)
 
     async def _handle_conversation_phase(self, message: str, session: Session) -> MessageResponse:
         """Handle intent mapping and clarification phases."""
@@ -104,6 +108,7 @@ class Orchestrator:
                     content=question,
                     intent_profile=session.intent_profile,
                     conviction_score=conviction,
+                    mode=session.mode.value,
                 )
 
             # High conviction — fetch products!
@@ -137,7 +142,167 @@ class Orchestrator:
                 intent_profile=session.intent_profile,
                 conviction_score=conviction,
                 widget=widget,
+                mode=session.mode.value,
             )
+
+    async def _handle_decision_mode(self, message: str, session: Session) -> MessageResponse:
+        """Handle dedicated Socratic decision-coaching mode."""
+        if session.decision_complete and session.decision_outcome:
+            content = (
+                f"**{session.decision_outcome.verdict}**\n\n"
+                f"{session.decision_outcome.rationale}\n\n"
+                f"Next step: {session.decision_outcome.recommendation}\n"
+                f"Alternative: {session.decision_outcome.non_consumer_alternative}"
+            )
+            return MessageResponse(
+                type="info",
+                content=content,
+                intent_profile=session.intent_profile,
+                conviction_score=session.intent_profile.conviction_score,
+                mode=session.mode.value,
+                stage="conclusion",
+                turn=session.decision_turn_count,
+                max_turns=self._settings.decision_max_turns,
+                completed=True,
+                decision_outcome=session.decision_outcome,
+            )
+
+        profile = await self._intent_mapper.extract_intent(
+            message,
+            session.conversation_history,
+            session.intent_profile,
+        )
+        session.intent_profile = profile
+
+        conviction, reasoning = await self._socratic.update_conviction(
+            session.conversation_history,
+            profile.conviction_score,
+            profile.confidence_score,
+        )
+        session.intent_profile.conviction_score = conviction
+
+        if not session.initial_statement:
+            session.initial_statement = message
+
+        session.phase = SessionPhase.SOCRATIC_FRICTION
+        session.decision_turn_count += 1
+        max_turns = self._settings.decision_max_turns
+
+        logger.info(
+            "decision_mode_update",
+            session_id=session.id,
+            turn=session.decision_turn_count,
+            conviction=conviction,
+            reasoning=reasoning,
+        )
+
+        should_conclude = self._should_conclude_decision(message, session)
+        if should_conclude:
+            return await self._finalize_decision_mode(session)
+
+        turn = await self._socratic.generate_decision_turn(
+            session.intent_profile,
+            session.conversation_history,
+            session.initial_statement,
+            session.decision_turn_count,
+            max_turns,
+        )
+        session.decision_stage = str(turn.get("stage") or "clarify")
+
+        if bool(turn.get("should_conclude")) and session.decision_turn_count >= self._settings.decision_min_turns_before_conclusion:
+            return await self._finalize_decision_mode(session)
+
+        question = str(turn.get("question") or "What exactly are you trying to avoid regretting here?")
+        session.conversation_history.append(
+            ConversationMessage(
+                role=MessageRole.AGENT,
+                content=question,
+                metadata={
+                    "mode": session.mode.value,
+                    "stage": session.decision_stage,
+                    "turn": session.decision_turn_count,
+                },
+            )
+        )
+
+        return MessageResponse(
+            type="question",
+            content=question,
+            intent_profile=session.intent_profile,
+            conviction_score=conviction,
+            mode=session.mode.value,
+            stage=session.decision_stage,
+            turn=session.decision_turn_count,
+            max_turns=max_turns,
+            completed=False,
+        )
+
+    def _should_conclude_decision(self, message: str, session: Session) -> bool:
+        if session.decision_turn_count >= self._settings.decision_max_turns:
+            return True
+
+        if session.decision_turn_count < self._settings.decision_min_turns_before_conclusion:
+            return False
+
+        message_lower = message.lower()
+        exit_signals = [
+            "i've decided",
+            "i have decided",
+            "that's enough",
+            "thats enough",
+            "make the call",
+            "give me the verdict",
+            "i'm clear now",
+            "im clear now",
+        ]
+        if any(signal in message_lower for signal in exit_signals):
+            return True
+
+        return session.intent_profile.conviction_score >= self._settings.decision_conclusion_threshold
+
+    async def _finalize_decision_mode(self, session: Session) -> MessageResponse:
+        session.decision_complete = True
+        session.decision_stage = "conclusion"
+
+        outcome = await self._socratic.finalize_decision(
+            session.intent_profile,
+            session.conversation_history,
+            session.initial_statement,
+        )
+        session.decision_outcome = outcome
+
+        content = (
+            f"**{outcome.verdict}**\n\n"
+            f"{outcome.rationale}\n\n"
+            f"Next step: {outcome.recommendation}\n"
+            f"Alternative: {outcome.non_consumer_alternative}"
+        )
+
+        session.conversation_history.append(
+            ConversationMessage(
+                role=MessageRole.AGENT,
+                content=content,
+                metadata={
+                    "mode": session.mode.value,
+                    "stage": session.decision_stage,
+                    "turn": session.decision_turn_count,
+                    "completed": True,
+                },
+            )
+        )
+
+        return MessageResponse(
+            type="info",
+            content=content,
+            intent_profile=session.intent_profile,
+            conviction_score=session.intent_profile.conviction_score,
+            mode=session.mode.value,
+            stage=session.decision_stage,
+            turn=session.decision_turn_count,
+            max_turns=self._settings.decision_max_turns,
+            completed=True,
+            decision_outcome=outcome,
+        )
 
     def _detect_widget(self, session: Session) -> WidgetRequest | None:
         """Detect if a widget would help the user respond faster."""
@@ -222,6 +387,7 @@ class Orchestrator:
                     content=question,
                     intent_profile=session.intent_profile,
                     conviction_score=session.intent_profile.conviction_score,
+                    mode=session.mode.value,
                 )
 
             session.progress_steps.append("Scoring and ranking products...")
@@ -242,6 +408,7 @@ class Orchestrator:
                 products=scored_products[:12],
                 intent_profile=session.intent_profile,
                 conviction_score=session.intent_profile.conviction_score,
+                mode=session.mode.value,
             )
         except Exception as e:
             logger.error("product_fetch_failed", error=str(e))
@@ -257,6 +424,7 @@ class Orchestrator:
                 content=question,
                 intent_profile=session.intent_profile,
                 conviction_score=session.intent_profile.conviction_score,
+                mode=session.mode.value,
             )
 
     async def _handle_product_question(self, message: str, session: Session) -> MessageResponse:

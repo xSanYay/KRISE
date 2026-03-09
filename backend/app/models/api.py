@@ -6,12 +6,14 @@ from typing import Optional
 
 from app.models.intent import IntentProfile
 from app.models.product import ProductScore
+from app.models.session import DecisionOutcome
 
 
 # ── Requests ──────────────────────────────────────────────
 
 class CreateSessionRequest(BaseModel):
     language: str = "en"
+    mode: str = "standard"
 
 
 class SendMessageRequest(BaseModel):
@@ -31,6 +33,7 @@ class SessionResponse(BaseModel):
     session_id: str
     status: str = "active"
     phase: str
+    mode: str = "standard"
 
 
 class WidgetRequest(BaseModel):
@@ -50,6 +53,12 @@ class MessageResponse(BaseModel):
     products: list[ProductScore] = Field(default_factory=list)
     conviction_score: float = 0.0
     widget: Optional[WidgetRequest] = None
+    mode: str = "standard"
+    stage: str = ""
+    turn: int = 0
+    max_turns: int = 0
+    completed: bool = False
+    decision_outcome: Optional[DecisionOutcome] = None
 
 
 class SwipeResponse(BaseModel):
