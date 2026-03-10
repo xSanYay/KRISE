@@ -54,6 +54,9 @@ Intent Profile:
 - Current conviction score: {conviction_score}
 - Conversation so far: {conversation_summary}
 
+Live web context (may be empty — use only if present and relevant):
+{web_context}
+
 Rules:
 1. Ask about ONE specific missing detail, not multiple things
 2. If budget is missing, ask directly "What's your budget range?"
@@ -61,6 +64,7 @@ Rules:
 4. If use case is vague, ask about the specific activity (e.g., "Will this be used mainly for calling, social media, or gaming?")
 5. Do NOT repeat questions already asked in the conversation
 6. NEVER ask generic questions like "anything else?" or "any other preferences?"
+7. If the web context reveals a known real-world issue or finding, you may use it to sharpen the question — but keep asking only ONE question.
 
 Respond with ONLY the question text. No preamble."""
 
@@ -77,6 +81,37 @@ Intent Profile:
 
 Respond with ONLY a JSON array of 3 search query strings. Example:
 ["gaming laptop under 80000", "RTX 3060 laptop India", "ASUS TUF gaming laptop"]"""
+
+
+DDG_PRODUCT_EXTRACTION_SYSTEM = """You are a product data extractor for the Indian market. \
+Extract structured product listings from web search result snippets. \
+Only include products where a clear INR price is explicitly mentioned."""
+
+DDG_PRODUCT_EXTRACTION_PROMPT = """Extract product listings from these web search results for: "{query}"
+
+Search Results:
+{snippets}
+
+Respond ONLY with a JSON array of products. Include up to 10 distinct products:
+[
+  {{
+    "title": "Full product name and model",
+    "brand": "Brand name",
+    "price": price_as_number_in_INR,
+    "original_price": original_price_or_null,
+    "url": "product URL or empty string",
+    "source": "amazon or flipkart or web",
+    "specs": {{"key": "value"}},
+    "rating": rating_number_or_null,
+    "availability": "in_stock"
+  }}
+]
+
+Rules:
+- Only include products with a price clearly mentioned in INR (e.g. ₹14,999 → 14999)
+- Do NOT invent or estimate prices
+- Convert "14,999" or "₹ 14999" to plain number 14999
+- Extract any specs mentioned (RAM, storage, battery, processor, etc.)"""
 
 
 HTML_PRODUCT_EXTRACTION_SYSTEM = """You are a data extraction expert. Extract product information \
@@ -170,6 +205,55 @@ Respond with ONLY a JSON object:
 {{"conviction_score": 0.0-1.0, "reasoning": "brief explanation"}}"""
 
 
+LLM_PRODUCT_GENERATION_SYSTEM = """You are an expert product advisor for the Indian consumer market. \
+You have deep knowledge of real products available in India — their models, specifications, typical retail prices, \
+and brand reputations. When scraping fails, you generate accurate product suggestions from your training knowledge. \
+Only suggest real, widely-available products. Do not invent models or guess specs.\
+"""
+
+LLM_PRODUCT_GENERATION_PROMPT = """A user needs product recommendations. Live scraping failed. \
+Generate a list of real, currently-available products in India that match their needs.
+
+User intent:
+- Use case: {primary_use_case}
+- Category: {product_category}
+- Budget: ₹{budget_max}
+- Key requirements: {requirements}
+- Brand preferences: {brand_preferences}
+- Secondary uses: {secondary_uses}
+
+Respond ONLY with a JSON array of 6–10 real products. Use real model names and accurate typical prices:
+[
+  {{
+    "title": "Full product name including model number",
+    "brand": "Brand name",
+    "price": price_as_number_in_INR,
+    "original_price": higher_mrp_or_null,
+    "url": "",
+    "source": "ai_suggested",
+    "rating": rating_from_1_to_5_or_null,
+    "specs": {{
+      "processor": "...",
+      "ram": "...",
+      "storage": "...",
+      "battery": "...",
+      "display": "...",
+      "camera": "..."
+    }},
+    "availability": "in_stock"
+  }}
+]
+
+Rules:
+- Only real, existing models available in India as of 2025-2026
+- Price must be within ±20% of the user's budget
+- Prioritize models that best match the stated use case and requirements
+- Include mixed sources: both Amazon and Flipkart carry these
+- If brand preferences are given, respect them; otherwise spread across popular brands
+- Do NOT include models that are discontinued or unavailable
+"""
+
+
 DECISION_SOCRATIC_SYSTEM = """You are the Save Yourself Gatekeeper.
 Your job is to help the user avoid impulse purchases and misaligned buying decisions.
 You are direct, skeptical, and rigorous, but not rude.
@@ -196,6 +280,9 @@ Intent profile summary:
 Recent conversation:
 {conversation_summary}
 
+Live web context (may be empty — use only if present and relevant):
+{web_context}
+
 Rules:
 1. Ask one pointed question only.
 2. Force the user to justify tradeoffs, not repeat specs.
@@ -203,6 +290,7 @@ Rules:
 4. If the user sounds emotional, status-driven, bored, or vague, call that out gently.
 5. Avoid generic filler and avoid repeating prior questions.
 6. Keep the response under 80 words.
+7. If the web context reveals a real-world issue (e.g. a known bug, battery problem, price drop), you may weave it into your question as a pointed challenge — but still ask only ONE question.
 
 Respond with ONLY valid JSON:
 {{

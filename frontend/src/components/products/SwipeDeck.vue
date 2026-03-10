@@ -1,16 +1,16 @@
 <template>
   <div class="swipe-deck" v-if="products.length > 0">
+    <div class="deck-counter">{{ products.length }} LEFT</div>
     <div class="deck-container">
-      <!-- Show top card -->
-      <ProductCard
-        v-if="currentProduct"
-        :scored="currentProduct"
-        @swipe="handleSwipe"
-      />
-
-      <div v-if="products.length === 0" class="deck-empty">
-        <p>You've reviewed all the recommendations.</p>
-      </div>
+      <!-- Transition wrapper for smooth card change -->
+      <Transition name="card-swap" mode="out-in">
+        <ProductCard
+          v-if="currentProduct"
+          :key="currentProduct.product.id"
+          :scored="currentProduct"
+          @swipe="handleSwipe"
+        />
+      </Transition>
     </div>
 
     <!-- Swipe reason modal -->
@@ -98,13 +98,24 @@ function cancelReason() {
   position: relative;
 }
 
+.deck-counter {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 8px 0 4px;
+  flex-shrink: 0;
+}
+
 .deck-container {
   flex: 1;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 16px;
+  padding: 8px 16px 16px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .deck-empty {
@@ -161,5 +172,21 @@ function cancelReason() {
   bottom: 12px;
   right: 12px;
   font-size: 12px;
+}
+
+/* Card swap transition */
+.card-swap-enter-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.card-swap-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.card-swap-enter-from {
+  opacity: 0;
+  transform: translateY(12px) scale(0.97);
+}
+.card-swap-leave-to {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.97);
 }
 </style>

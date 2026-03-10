@@ -14,10 +14,13 @@
     <!-- Product image or placeholder -->
     <div class="card-image">
       <img
-        v-if="scored.product.images.length > 0"
+        v-if="scored.product.images.length > 0 && !imgError"
         :src="scored.product.images[0]"
         :alt="scored.product.title"
-        loading="lazy"
+        referrerpolicy="no-referrer"
+        crossorigin="anonymous"
+        loading="eager"
+        @error="imgError = true"
       />
       <div v-else class="img-placeholder">
         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3">
@@ -99,6 +102,7 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import type { ProductScore } from '@/lib/api'
 
 const props = defineProps<{
@@ -109,6 +113,8 @@ const props = defineProps<{
 defineEmits<{
   swipe: [direction: string]
 }>()
+
+const imgError = ref(false)
 
 const sourceBadgeClass = props.scored.product.source === 'amazon'
   ? 'badge-warning'
@@ -132,6 +138,8 @@ function formatCount(n: number): string {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  border-radius: var(--radius-lg);
+  flex-shrink: 0;
 }
 
 .score-badge {
@@ -173,18 +181,20 @@ function formatCount(n: number): string {
 }
 
 .card-image {
-  height: 280px;
+  height: 240px;
   background: #FFFFFF;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
 }
 .card-image img {
-  max-height: 100%;
-  max-width: 100%;
-  object-fit: cover;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 8px;
 }
 .img-placeholder {
   display: flex;
@@ -194,9 +204,6 @@ function formatCount(n: number): string {
 
 .card-body {
   padding: 16px 20px;
-  flex: 1;
-  overflow-y: auto;
-  max-height: 320px;
 }
 
 .card-title {

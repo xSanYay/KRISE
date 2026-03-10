@@ -92,7 +92,7 @@ class BrowserManager:
 
         try:
             # wait_until="domcontentloaded" is faster than networkidle
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=20000)
             # Wait a small bit for dynamic JS content to render
             await page.wait_for_timeout(500)
         except Exception as e:

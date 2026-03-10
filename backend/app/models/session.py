@@ -63,6 +63,8 @@ class Session(BaseModel):
     shortlist: list[str] = Field(default_factory=list)  # product IDs
     socratic_turn_count: int = 0
     asked_pre_search_clarification: bool = False
+    asked_brand_widget: bool = False
+    asked_budget_widget: bool = False
     initial_statement: str = ""
     decision_turn_count: int = 0
     decision_stage: str = "opening"

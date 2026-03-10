@@ -1,4 +1,18 @@
-const API_BASE = '/api/v1'
+// In production (S3), VITE_API_URL is injected at build time pointing to App Runner.
+// In dev, it's empty so Vite's proxy handles /api → localhost:8000.
+const API_BASE = `${import.meta.env.VITE_API_URL ?? ''}/api/v1`
+
+async function parseJsonResponse<T>(res: Response): Promise<T> {
+    if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        let detail = text
+        try { detail = (JSON.parse(text) as { detail?: string }).detail ?? text } catch { /* ignore */ }
+        throw new Error(`Server error ${res.status}: ${detail.slice(0, 200)}`)
+    }
+    const text = await res.text()
+    if (!text) throw new Error('Empty response from server')
+    return JSON.parse(text) as T
+}
 
 export type SessionMode = 'standard' | 'socratic_decision'
 
@@ -116,16 +130,28 @@ export async function createSession(language: string = 'en', mode: SessionMode =
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ language, mode }),
     })
-    return res.json()
+    return parseJsonResponse<SessionResponse>(res)
 }
 
 export async function sendMessage(sessionId: string, content: string): Promise<MessageResponse> {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/message`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, type: 'text' }),
-    })
-    return res.json()
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 45000)
+    try {
+        const res = await fetch(`${API_BASE}/sessions/${sessionId}/message`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content, type: 'text' }),
+            signal: controller.signal,
+        })
+        return parseJsonResponse<MessageResponse>(res)
+    } catch (err: unknown) {
+        if (err instanceof Error && err.name === 'AbortError') {
+            throw new Error('Request timed out — the search is taking too long. Please try again.')
+        }
+        throw err
+    } finally {
+        clearTimeout(timeoutId)
+    }
 }
 
 export async function swipeProduct(
@@ -139,15 +165,15 @@ export async function swipeProduct(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ product_id: productId, direction, reason }),
     })
-    return res.json()
+    return parseJsonResponse(res)
 }
 
 export async function getProducts(sessionId: string) {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/products`)
-    return res.json()
+    return parseJsonResponse(res)
 }
 
 export async function getProfile(sessionId: string) {
     const res = await fetch(`${API_BASE}/sessions/${sessionId}/profile`)
-    return res.json() as Promise<ProfileResponse>
+    return parseJsonResponse<ProfileResponse>(res)
 }

@@ -48,7 +48,7 @@ class Settings(BaseSettings):
 
     # Agent thresholds
     conviction_threshold: float = 0.80
-    max_socratic_turns: int = 5
+    max_socratic_turns: int = 2
     decision_max_turns: int = 10
     decision_min_turns_before_conclusion: int = 3
     decision_conclusion_threshold: float = 0.85

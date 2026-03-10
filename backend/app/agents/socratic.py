@@ -1,6 +1,7 @@
 """Socratic Friction Agent — challenges user assumptions to build conviction."""
 
 from __future__ import annotations
+import re
 import structlog
 
 from app.llm.base import LLMProvider
@@ -14,9 +15,25 @@ from app.llm.prompts import (
     DECISION_CONCLUSION_PROMPT,
 )
 from app.models.intent import IntentProfile
-from app.models.session import ConversationMessage, DecisionOutcome
+from app.models.session import ConversationMessage, MessageRole, DecisionOutcome
+from app.websearch.search import WebSearcher
 
 logger = structlog.get_logger()
+
+# Brands and model patterns worth searching for
+_PRODUCT_PATTERN = re.compile(
+    r"\b("
+    r"iphone\s*\d*\s*(pro|plus|max|mini)?|"
+    r"galaxy\s+[a-z]*\s*\d+\s*(ultra|plus|fe)?|"
+    r"pixel\s+\d+\s*(pro|a)?|"
+    r"oneplus\s+\d+\s*(pro|r|t)?|"
+    r"nothing\s+phone|macbook\s*(pro|air|mini)?|"
+    r"apple|samsung|google|oneplus|realme|redmi|xiaomi|motorola|asus|"
+    r"dell|hp|lenovo|sony|lg|boat|jbl|bose|dyson|whirlpool|voltas|haier|"
+    r"godrej|oppo|vivo|noise|mi\s+\d"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 class SocraticFrictionAgent:
@@ -35,8 +52,59 @@ class SocraticFrictionAgent:
         ("conclude", "Prepare to conclude with a verdict and next step."),
     ]
 
-    def __init__(self, llm: LLMProvider):
+    def __init__(self, llm: LLMProvider, web_searcher: WebSearcher | None = None):
         self._llm = llm
+        self._searcher = web_searcher
+
+    # ------------------------------------------------------------------
+    # Web context helpers
+    # ------------------------------------------------------------------
+
+    def _detect_search_subject(
+        self,
+        conversation_history: list[ConversationMessage],
+        intent_profile: IntentProfile,
+    ) -> str | None:
+        """Return a concise search subject if there's something worth verifying."""
+        recent_text = " ".join(
+            msg.content for msg in conversation_history[-4:]
+            if msg.role == MessageRole.USER
+        )
+        match = _PRODUCT_PATTERN.search(recent_text)
+        if match:
+            brand_or_model = match.group(0).strip()
+            # Tack on the product category for a tighter query
+            if intent_profile.product_category:
+                return f"{brand_or_model} {intent_profile.product_category}"
+            return brand_or_model
+        return None
+
+    async def _fetch_web_context(
+        self,
+        conversation_history: list[ConversationMessage],
+        intent_profile: IntentProfile,
+    ) -> str:
+        """Return a short bullet summary of live web findings, or empty string."""
+        if self._searcher is None:
+            return ""
+        subject = self._detect_search_subject(conversation_history, intent_profile)
+        if not subject:
+            return ""
+        results = await self._searcher.fact_check(subject, max_results=5)
+        if not results:
+            return ""
+        bullets = []
+        for r in results[:3]:
+            title = r.get("title", "")
+            snippet = r.get("snippet", "")
+            line = f"- {title}: {snippet}".strip(" -:")
+            if line:
+                bullets.append(line)
+        if not bullets:
+            return ""
+        context = "Current web findings:\n" + "\n".join(bullets)
+        logger.info("web_context_fetched", subject=subject, hits=len(bullets))
+        return context
 
     async def generate_question(
         self,
@@ -60,6 +128,8 @@ class SocraticFrictionAgent:
         # Build ambiguities string
         ambiguities = ", ".join(intent_profile.ambiguities[:3]) if intent_profile.ambiguities else "None identified"
 
+        web_context = await self._fetch_web_context(conversation_history, intent_profile)
+
         prompt = SOCRATIC_QUESTION_PROMPT.format(
             primary_use_case=intent_profile.primary_use_case,
             product_category=intent_profile.product_category or "Not specified",
@@ -67,7 +137,8 @@ class SocraticFrictionAgent:
             requirements=reqs,
             ambiguities=ambiguities,
             conviction_score=f"{intent_profile.conviction_score:.2f}",
-            conversation_summary=summary
+            conversation_summary=summary,
+            web_context=web_context,
         )
 
         question = await self._llm.generate(prompt, system=SOCRATIC_QUESTION_SYSTEM, max_tokens=300)
@@ -136,6 +207,8 @@ class SocraticFrictionAgent:
         brand_preferences = ", ".join(intent_profile.constraints.brand_preferences) or "None specified"
         ambiguities = ", ".join(intent_profile.ambiguities[:4]) or "None identified"
 
+        web_context = await self._fetch_web_context(conversation_history, intent_profile)
+
         prompt = DECISION_SOCRATIC_TURN_PROMPT.format(
             turn_number=turn_number,
             max_turns=max_turns,
@@ -149,6 +222,7 @@ class SocraticFrictionAgent:
             ambiguities=ambiguities,
             conviction_score=f"{intent_profile.conviction_score:.2f}",
             conversation_summary=summary,
+            web_context=web_context,
         )
 
         result = await self._llm.generate_json(

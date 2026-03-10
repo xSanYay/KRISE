@@ -214,26 +214,22 @@ export const useSessionStore = defineStore('session', () => {
     async function handleSwipe(productId: string, direction: string, reason?: string) {
         if (!sessionId.value) return
 
+        // Optimistic update: remove card immediately so the deck advances right away
         if (direction === 'right') {
             shortlist.value.push(productId)
         }
+        products.value = products.value.filter((p: ProductScore) => p.product.id !== productId)
 
-        try {
-            const res = await apiSwipe(sessionId.value, productId, direction, reason)
-            // Remove swiped product
-            products.value = products.value.filter((p: ProductScore) => p.product.id !== productId)
+        // Check if deck is empty after swipe
+        const deckEmpty = products.value.length === 0
 
-            // If new products were fetched (deck refill), add them
-            if (res.remaining_count > products.value.length) {
-                // Server has more products; could refresh from API
-            }
+        // Fire API in background — don't block UI
+        apiSwipe(sessionId.value, productId, direction, reason).catch((err) => {
+            console.error('Swipe API call failed (non-blocking):', err)
+        })
 
-            // Check if deck is empty after swipe and all products consumed
-            if (products.value.length === 0) {
-                sendMessage("I've finished shortlisting the recommended products.")
-            }
-        } catch (err) {
-            console.error('Swipe failed:', err)
+        if (deckEmpty) {
+            sendMessage("I've finished shortlisting the recommended products.")
         }
     }
 

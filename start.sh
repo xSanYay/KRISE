@@ -40,60 +40,63 @@ cleanup_port() {
     fi
 }
 
-# Ask user for package manager preference
-echo ""
-echo "Choose your package manager:"
-echo "1) UV (faster)"
-echo "2) pip (default)"
-echo ""
-read -p "Enter option (1 or 2): " PACKAGE_MANAGER
-
-# Validate input
-if [ "$PACKAGE_MANAGER" != "1" ] && [ "$PACKAGE_MANAGER" != "2" ]; then
-    echo "Invalid option. Defaulting to pip."
-    PACKAGE_MANAGER="2"
-fi
-
-# Handle UV setup if chosen
-if [ "$PACKAGE_MANAGER" == "1" ]; then
-    echo "Setting up UV..."
-    if ! command -v uv &> /dev/null; then
-        if ! command -v pipx &> /dev/null; then
-            echo "Installing pipx..."
-            python3 -m pip install --user pipx
-            export PATH="$PATH:$HOME/.local/bin"
-        fi
-        echo "Installing uv via pipx..."
-        pipx install uv
-        export PATH="$PATH:$HOME/.local/bin"
-    fi
-fi
-
-# Setup venv in root directory
-echo "Setting up virtual environment at ./.venv..."
+# Purge stale venv created in an old backend/.venv location
 if [ -f "$VENV_DIR/bin/activate" ] && grep -q "$SCRIPT_DIR/backend/.venv" "$VENV_DIR/bin/activate"; then
     echo "Found stale virtual environment metadata. Recreating .venv..."
     rm -rf "$VENV_DIR"
 fi
 
-if [ ! -x "$VENV_PYTHON" ]; then
-    python3 -m venv "$VENV_DIR"
-fi
-
-# Install backend dependencies
-echo "Installing backend dependencies..."
-if [ "$PACKAGE_MANAGER" == "1" ]; then
-    uv pip install --python "$VENV_PYTHON" -r "$SCRIPT_DIR/backend/requirements.txt"
+if [ -x "$VENV_PYTHON" ]; then
+    echo "Virtual environment already exists at ./.venv — skipping setup."
 else
-    "$VENV_PYTHON" -m pip install -r "$SCRIPT_DIR/backend/requirements.txt"
-fi
-"$VENV_PYTHON" -m playwright install chromium
+    # Ask user for package manager preference
+    echo ""
+    echo "Choose your package manager:"
+    echo "1) UV (faster)"
+    echo "2) pip (default)"
+    echo ""
+    read -p "Enter option (1 or 2): " PACKAGE_MANAGER
 
-# Install frontend dependencies
-echo "Installing frontend dependencies..."
-cd "$SCRIPT_DIR/frontend"
-npm install
-cd ..
+    # Validate input
+    if [ "$PACKAGE_MANAGER" != "1" ] && [ "$PACKAGE_MANAGER" != "2" ]; then
+        echo "Invalid option. Defaulting to pip."
+        PACKAGE_MANAGER="2"
+    fi
+
+    # Handle UV setup if chosen
+    if [ "$PACKAGE_MANAGER" == "1" ]; then
+        echo "Setting up UV..."
+        if ! command -v uv &> /dev/null; then
+            if ! command -v pipx &> /dev/null; then
+                echo "Installing pipx..."
+                python3 -m pip install --user pipx
+                export PATH="$PATH:$HOME/.local/bin"
+            fi
+            echo "Installing uv via pipx..."
+            pipx install uv
+            export PATH="$PATH:$HOME/.local/bin"
+        fi
+    fi
+
+    echo "Setting up virtual environment at ./.venv..."
+    python3 -m venv "$VENV_DIR"
+
+    echo "Installing backend dependencies..."
+    if [ "$PACKAGE_MANAGER" == "1" ]; then
+        uv pip install --python "$VENV_PYTHON" -r "$SCRIPT_DIR/backend/requirements.txt"
+    else
+        "$VENV_PYTHON" -m pip install -r "$SCRIPT_DIR/backend/requirements.txt"
+    fi
+    "$VENV_PYTHON" -m playwright install chromium
+fi
+
+# Install frontend dependencies only when node_modules is missing
+if [ ! -d "$SCRIPT_DIR/frontend/node_modules" ]; then
+    echo "Installing frontend dependencies..."
+    cd "$SCRIPT_DIR/frontend"
+    npm install
+    cd ..
+fi
 
 cleanup_port "$APP_PORT"
 cleanup_port 5173

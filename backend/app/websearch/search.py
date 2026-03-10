@@ -13,8 +13,9 @@ logger = structlog.get_logger()
 class WebSearcher:
     """Searches the web for product reviews and sentiment data."""
 
-    def __init__(self):
-        self._ddgs = DDGS()
+    def _new_ddgs(self) -> DDGS:
+        """Create a fresh DDGS instance each call to avoid reusing rate-limited sessions."""
+        return DDGS()
 
     async def search_reviews(self, product_name: str, max_results: int = 10) -> list[dict[str, Any]]:
         """Search for product reviews on Reddit, YouTube, and forums."""
@@ -27,10 +28,10 @@ class WebSearcher:
         all_results = []
         for query in queries:
             try:
-                # Wrap synchronous DDGS call in a thread and enforce a strict timeout
+                ddgs = self._new_ddgs()
                 raw_results = await asyncio.wait_for(
-                    asyncio.to_thread(self._ddgs.text, query, region="in-en", max_results=max_results),
-                    timeout=3.0
+                    asyncio.to_thread(ddgs.text, query, region="in-en", max_results=max_results),
+                    timeout=4.0
                 )
                 results = list(raw_results)
                 for r in results:
@@ -47,12 +48,35 @@ class WebSearcher:
         logger.info("web_search_complete", product=product_name, results=len(all_results))
         return all_results
 
+    async def fact_check(self, subject: str, max_results: int = 5) -> list[dict[str, Any]]:
+        """Search for real-world facts, reviews, and issues about a product or claim."""
+        query = f"{subject} review problems real world India 2025"
+        try:
+            ddgs = self._new_ddgs()
+            raw_results = await asyncio.wait_for(
+                asyncio.to_thread(ddgs.text, query, region="in-en", max_results=max_results),
+                timeout=4.0,
+            )
+            return [
+                {
+                    "title": r.get("title", ""),
+                    "snippet": r.get("body", "")[:200],
+                    "url": r.get("href", ""),
+                    "source": self._classify_source(r.get("href", "")),
+                }
+                for r in list(raw_results)
+            ]
+        except Exception as e:
+            logger.warning("fact_check_failed", subject=subject, error=str(e))
+            return []
+
     async def search_products(self, query: str, max_results: int = 5) -> list[dict[str, Any]]:
         """Search for product listings."""
         try:
+            ddgs = self._new_ddgs()
             raw_results = await asyncio.wait_for(
-                asyncio.to_thread(self._ddgs.text, f"{query} buy India price", region="in-en", max_results=max_results),
-                timeout=3.0
+                asyncio.to_thread(ddgs.text, f"{query} buy India price", region="in-en", max_results=max_results),
+                timeout=4.0
             )
             results = list(raw_results)
             return [

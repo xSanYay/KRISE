@@ -10,6 +10,7 @@ from app.agents.intent_mapper import IntentMapperAgent
 from app.agents.socratic import SocraticFrictionAgent
 from app.agents.scraper import ScraperAgent
 from app.scoring.engine import ScoringEngine
+from app.websearch.search import WebSearcher
 from app.models.session import Session, SessionMode, SessionPhase, ConversationMessage, MessageRole, SwipeAction
 from app.models.api import MessageResponse, SwipeResponse, WidgetRequest
 from app.config import get_settings
@@ -24,7 +25,8 @@ class Orchestrator:
         self._llm = llm
         self._small_talk_llm: LLMProvider | None = None
         self._intent_mapper = IntentMapperAgent(llm)
-        self._socratic = SocraticFrictionAgent(llm)
+        self._web_searcher = WebSearcher()
+        self._socratic = SocraticFrictionAgent(llm, web_searcher=self._web_searcher)
         self._scraper = ScraperAgent(llm)
         self._scoring = ScoringEngine(llm)
         self._settings = get_settings()
@@ -158,36 +160,7 @@ class Orchestrator:
         user_wants_skip = any(phrase in message.lower() for phrase in skip_phrases)
 
         if conviction >= self._settings.conviction_threshold or user_wants_skip:
-            # Only ask the "before I search" clarification ONCE
-            if (
-                session.intent_profile.ambiguities
-                and not session.asked_pre_search_clarification
-                and not user_wants_skip
-                and session.socratic_turn_count < self._settings.max_socratic_turns
-            ):
-                # Ask about remaining clarifications as a batch — but only ONE time
-                remaining = session.intent_profile.ambiguities[:3]
-                formatted = ", ".join(remaining)
-                question = f"Before I search, I'd like to know about: {formatted}. Share any preferences, or say 'go ahead' to search now."
-
-                session.asked_pre_search_clarification = True
-                session.phase = SessionPhase.SOCRATIC_FRICTION
-                session.socratic_turn_count += 1
-                session.intent_profile.conviction_score = conviction
-
-                session.conversation_history.append(
-                    ConversationMessage(role=MessageRole.AGENT, content=question)
-                )
-
-                return MessageResponse(
-                    type="question",
-                    content=question,
-                    intent_profile=session.intent_profile,
-                    conviction_score=conviction,
-                    mode=session.mode.value,
-                )
-
-            # High conviction — fetch products!
+            # High conviction — fetch products immediately, no extra gating
             session.phase = SessionPhase.FETCHING_PRODUCTS
             return await self._fetch_and_score_products(session)
 
@@ -384,8 +357,9 @@ class Orchestrator:
         """Detect if a widget would help the user respond faster."""
         profile = session.intent_profile
 
-        # Budget not set yet — show budget slider
-        if profile.constraints.budget_max is None and session.socratic_turn_count >= 1:
+        # Budget not set yet — show budget slider (only once)
+        if profile.constraints.budget_max is None and session.socratic_turn_count >= 1 and not session.asked_budget_widget:
+            session.asked_budget_widget = True
             return WidgetRequest(
                 widget_type="budget_slider",
                 label="Set your budget range",
@@ -402,8 +376,13 @@ class Orchestrator:
                 options=["Phone", "Laptop", "Tablet", "TV", "Wearable", "Gaming", "Appliance"],
             )
 
-        # Brands not specified and we have a category
-        if profile.product_category and not profile.constraints.brand_preferences and session.socratic_turn_count >= 2:
+        # Brands not specified and we have a category — show only once
+        if (
+            profile.product_category
+            and not profile.constraints.brand_preferences
+            and not session.asked_brand_widget
+            and session.socratic_turn_count >= 2
+        ):
             brand_map = {
                 "phone": ["Samsung", "Apple", "OnePlus", "Xiaomi", "Realme", "Vivo", "Nothing", "No preference"],
                 "laptop": ["HP", "Dell", "Lenovo", "ASUS", "Acer", "Apple", "MSI", "No preference"],
@@ -412,6 +391,7 @@ class Orchestrator:
             }
             brands = brand_map.get(profile.product_category.lower(), None)
             if brands:
+                session.asked_brand_widget = True
                 return WidgetRequest(
                     widget_type="brand_picker",
                     label="Any brand preference? (pick one or more)",
@@ -431,29 +411,15 @@ class Orchestrator:
             session.progress_steps.append(f"Found {len(products)} products")
 
             if not products:
-                # Instead of generic error, ask about specific features to help refine
+                # All scraping layers failed (live sites blocked, DDG rate-limited, LLM also returned nothing)
+                # This is extremely unlikely given the LLM fallback, but handle it gracefully
                 session.phase = SessionPhase.SOCRATIC_FRICTION
-
-                # Build a targeted follow-up based on what we know
                 category = session.intent_profile.product_category or "product"
-                budget = session.intent_profile.constraints.budget_max
-
-                if budget and budget < 1000:
-                    budget = budget * 1000  # Fix 25k -> 25000
-
-                suggestions = []
-                if not session.intent_profile.constraints.brand_preferences:
-                    suggestions.append("preferred brands")
-                if not session.intent_profile.technical_requirements:
-                    suggestions.append("must-have features (e.g., camera quality, battery life, storage)")
-                if budget is None:
-                    suggestions.append("budget range")
-
-                if suggestions:
-                    question = f"I'm having trouble finding the right {category}s. To narrow down better, could you tell me about: {', '.join(suggestions)}?"
-                else:
-                    question = f"Let me try different search terms. Could you describe in a few words the most important thing this {category} needs to do well?"
-
+                question = (
+                    f"I wasn't able to pull live listings right now due to a network issue. "
+                    f"Could you name one or two specific {category} models you've already looked at? "
+                    f"That'll help me give you a direct comparison."
+                )
                 session.conversation_history.append(
                     ConversationMessage(role=MessageRole.AGENT, content=question)
                 )
