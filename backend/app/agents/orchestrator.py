@@ -454,13 +454,17 @@ class Orchestrator:
             )
         except Exception as e:
             logger.error("product_fetch_failed", error=str(e))
+            # Even on exception, try to score whatever partial data may have been gathered
+            # and surface a clear error without looping back to questions
             session.phase = SessionPhase.SOCRATIC_FRICTION
-
-            question = "I had trouble searching right now. Could you describe in different words what you're looking for? For example, mention the brand or specific model you have in mind."
+            question = (
+                "I hit a technical issue fetching live prices. "
+                "Could you name one or two specific models you've been considering? "
+                "I'll give you a direct comparison based on what I know."
+            )
             session.conversation_history.append(
                 ConversationMessage(role=MessageRole.AGENT, content=question)
             )
-
             return MessageResponse(
                 type="question",
                 content=question,

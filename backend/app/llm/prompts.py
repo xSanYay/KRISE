@@ -187,19 +187,23 @@ Current conviction: {current_conviction}
 Current intent profile confidence: {confidence}
 
 Increase conviction if user:
-- Gives specific use cases (+0.15)
+- Gives specific use cases (+0.2)
+- Mentions who will use it and how (+0.15)
 - Has done prior research (+0.15)
 - Answers clarification questions with details (+0.15)
-- Has clear budget and priorities (+0.1)
-- Mentions specific brands or models (+0.1)
+- Has clear budget and priorities (+0.15)
+- Mentions specific brands, models, or processors (+0.1)
+- States functional needs like "full-day battery" or "payment apps" (+0.1)
 
 Decrease conviction if user:
-- Uses vague terms like "best" or "latest" (-0.1)
+- Uses vague terms like "best" or "latest" without context (-0.1)
 - Contradicts themselves (-0.15)
 - Says "I don't know" or similar (-0.05)
 
-IMPORTANT: Be generous with scores. If the user has stated a category, use case, and budget, score should be at least 0.7.
-If they additionally specify brands or technical needs, score 0.85+.
+IMPORTANT: Be generous. If the user has stated category + use case + budget, score ≥ 0.75.
+If they add specific requirements (battery life, performance, use context), score ≥ 0.85.
+A detailed message like "phone for my dad who is a shopkeeper, needs full-day battery, Snapdragon, ₹25k" should score 0.90+.
+Do not penalise users for not mentioning specific model names — that's what the product search is for.
 
 Respond with ONLY a JSON object:
 {{"conviction_score": 0.0-1.0, "reasoning": "brief explanation"}}"""
