@@ -13,6 +13,8 @@ from app.scoring.engine import ScoringEngine
 from app.websearch.search import WebSearcher
 from app.models.session import Session, SessionMode, SessionPhase, ConversationMessage, MessageRole, SwipeAction
 from app.models.api import MessageResponse, SwipeResponse, WidgetRequest
+from app.models.product import ProductScore
+from app.llm.prompts import SWIPE_CONCLUSION_SYSTEM, SWIPE_CONCLUSION_PROMPT
 from app.config import get_settings
 
 logger = structlog.get_logger()
@@ -53,10 +55,16 @@ class Orchestrator:
 
         if session.phase in (SessionPhase.INTENT_MAPPING, SessionPhase.SOCRATIC_FRICTION):
             return await self._handle_conversation_phase(message, session)
-        elif session.phase == SessionPhase.PRODUCT_RECOMMENDATION:
+        elif session.phase in (SessionPhase.PRODUCT_RECOMMENDATION, SessionPhase.FETCHING_PRODUCTS):
+            # FETCHING_PRODUCTS can linger if a message arrives mid-fetch; treat it
+            # the same as PRODUCT_RECOMMENDATION so we never hit 'Unknown session phase'.
+            session.phase = SessionPhase.PRODUCT_RECOMMENDATION
             return await self._handle_product_question(message, session)
         else:
-            return MessageResponse(type="error", content="Unknown session phase.", mode=session.mode.value)
+            # Fallback: if session is in an unexpected phase, try to recover gracefully
+            logger.warning("unexpected_session_phase", phase=session.phase, session_id=session.id)
+            session.phase = SessionPhase.PRODUCT_RECOMMENDATION
+            return await self._handle_product_question(message, session)
 
     def _is_small_talk_message(self, message: str, session: Session) -> bool:
         """Route casual chatter to a lightweight model without interrupting buying flows."""
@@ -159,8 +167,17 @@ class Orchestrator:
         skip_phrases = ["go ahead", "just search", "search now", "find products", "no preference", "doesn't matter", "don't care", "proceed", "skip"]
         user_wants_skip = any(phrase in message.lower() for phrase in skip_phrases)
 
-        if conviction >= self._settings.conviction_threshold or user_wants_skip:
-            # High conviction — fetch products immediately, no extra gating
+        # Enforce minimum turns before allowing product search (unless user explicitly skips)
+        min_turns_for_search = 2
+        has_enough_turns = session.socratic_turn_count >= min_turns_for_search
+
+        if user_wants_skip and session.socratic_turn_count >= 1:
+            # User explicitly wants to skip — allow after at least 1 turn
+            session.phase = SessionPhase.FETCHING_PRODUCTS
+            return await self._fetch_and_score_products(session)
+
+        if conviction >= self._settings.conviction_threshold and has_enough_turns:
+            # High conviction AND enough turns — fetch products
             session.phase = SessionPhase.FETCHING_PRODUCTS
             return await self._fetch_and_score_products(session)
 
@@ -168,18 +185,19 @@ class Orchestrator:
             session.phase = SessionPhase.FETCHING_PRODUCTS
             return await self._fetch_and_score_products(session)
         else:
-            # Generate a targeted clarification question with optional widget
+            # Generate a targeted clarification question — the LLM may include
+            # a <widget:type> tag to request an interactive widget alongside it.
             session.phase = SessionPhase.SOCRATIC_FRICTION
             session.socratic_turn_count += 1
 
-            question = await self._socratic.generate_question(
+            raw_question = await self._socratic.generate_question(
                 session.intent_profile,
                 session.conversation_history,
                 session.socratic_turn_count,
             )
 
-            # Detect if we should attach a widget for better UX
-            widget = self._detect_widget(session)
+            # Parse and strip any widget tag from the LLM output
+            question, widget = self._parse_widget_tag(raw_question, session)
 
             session.conversation_history.append(
                 ConversationMessage(role=MessageRole.AGENT, content=question)
@@ -223,15 +241,16 @@ class Orchestrator:
         )
         session.intent_profile = profile
 
-        conviction, reasoning = await self._socratic.update_conviction(
-            session.conversation_history,
-            profile.conviction_score,
-            profile.confidence_score,
-        )
-        session.intent_profile.conviction_score = conviction
+        # NOTE: We intentionally do NOT run conviction scoring in decision mode.
+        # The shopping-mode conviction scorer has phase gates that block decision
+        # conclusions. Decision mode uses turn count + LLM should_conclude instead.
 
         if not session.initial_statement:
             session.initial_statement = message
+            # Pre-fetch facts about mentioned products so LLM doesn't ask outdated questions
+            session.decision_facts = await self._socratic.fetch_decision_facts(
+                message, session.intent_profile
+            )
 
         session.phase = SessionPhase.SOCRATIC_FRICTION
         session.decision_turn_count += 1
@@ -241,8 +260,6 @@ class Orchestrator:
             "decision_mode_update",
             session_id=session.id,
             turn=session.decision_turn_count,
-            conviction=conviction,
-            reasoning=reasoning,
         )
 
         should_conclude = self._should_conclude_decision(message, session)
@@ -253,12 +270,13 @@ class Orchestrator:
             session.intent_profile,
             session.conversation_history,
             session.initial_statement,
+            session.decision_facts,
             session.decision_turn_count,
             max_turns,
         )
         session.decision_stage = str(turn.get("stage") or "clarify")
 
-        if bool(turn.get("should_conclude")) and session.decision_turn_count >= self._settings.decision_min_turns_before_conclusion:
+        if bool(turn.get("should_conclude")):
             return await self._finalize_decision_mode(session)
 
         question = str(turn.get("question") or "What exactly are you trying to avoid regretting here?")
@@ -278,7 +296,7 @@ class Orchestrator:
             type="question",
             content=question,
             intent_profile=session.intent_profile,
-            conviction_score=conviction,
+            conviction_score=session.intent_profile.conviction_score,
             mode=session.mode.value,
             stage=session.decision_stage,
             turn=session.decision_turn_count,
@@ -287,9 +305,11 @@ class Orchestrator:
         )
 
     def _should_conclude_decision(self, message: str, session: Session) -> bool:
+        # Hard cap: always conclude at max turns
         if session.decision_turn_count >= self._settings.decision_max_turns:
             return True
 
+        # Don't conclude too early
         if session.decision_turn_count < self._settings.decision_min_turns_before_conclusion:
             return False
 
@@ -303,11 +323,24 @@ class Orchestrator:
             "give me the verdict",
             "i'm clear now",
             "im clear now",
+            "just conclude",
+            "wrap up",
+            "done",
         ]
         if any(signal in message_lower for signal in exit_signals):
             return True
 
-        return session.intent_profile.conviction_score >= self._settings.decision_conclusion_threshold
+        # Detect user fatigue: short/repetitive answers signal they're done exploring
+        recent_user_msgs = [
+            m.content for m in session.conversation_history[-8:]
+            if m.role == MessageRole.USER
+        ]
+        if len(recent_user_msgs) >= 3:
+            short_answers = sum(1 for m in recent_user_msgs[-3:] if len(m.split()) <= 8)
+            if short_answers >= 3:
+                return True
+
+        return False
 
     async def _finalize_decision_mode(self, session: Session) -> MessageResponse:
         session.decision_complete = True
@@ -353,52 +386,137 @@ class Orchestrator:
             decision_outcome=outcome,
         )
 
-    def _detect_widget(self, session: Session) -> WidgetRequest | None:
-        """Detect if a widget would help the user respond faster."""
+    # ── Widget tag parsing ──────────────────────────────────────────────
+    _WIDGET_TAG_RE = re.compile(r'<widget:(budget|brand|category)>', re.IGNORECASE)
+
+    def _parse_widget_tag(
+        self, raw_text: str, session: Session
+    ) -> tuple[str, WidgetRequest | None]:
+        """Strip a <widget:type> tag from LLM output and return (clean_text, widget).
+
+        Each widget type is only shown once per session to avoid repetition.
+        """
+        match = self._WIDGET_TAG_RE.search(raw_text)
+        if not match:
+            return raw_text.strip(), None
+
+        widget_type = match.group(1).lower()
+        clean_text = self._WIDGET_TAG_RE.sub('', raw_text).strip()
         profile = session.intent_profile
 
-        # Budget not set yet — show budget slider (only once)
-        if profile.constraints.budget_max is None and session.socratic_turn_count >= 1 and not session.asked_budget_widget:
+        if widget_type == 'budget':
+            if session.asked_budget_widget or profile.constraints.budget_max is not None:
+                return clean_text, None
             session.asked_budget_widget = True
-            return WidgetRequest(
-                widget_type="budget_slider",
-                label="Set your budget range",
+            return clean_text, WidgetRequest(
+                widget_type='budget_slider',
+                label='Set your budget range',
                 min_value=5000,
                 max_value=200000,
                 step=1000,
             )
 
-        # Category not confidently set — show category picker
-        if not profile.product_category and session.socratic_turn_count >= 1:
-            return WidgetRequest(
-                widget_type="category_picker",
-                label="What are you looking for?",
-                options=["Phone", "Laptop", "Tablet", "TV", "Wearable", "Gaming", "Appliance"],
+        if widget_type == 'brand':
+            # Only show brand widget if user hasn't already seen it
+            # AND hasn't provided brand preferences AND we have enough context
+            if session.asked_brand_widget or profile.constraints.brand_preferences or session.socratic_turn_count < 3:
+                return clean_text, None
+            session.asked_brand_widget = True
+            brand_map = {
+                'phone': ['Samsung', 'Apple', 'OnePlus', 'Xiaomi', 'Realme', 'Vivo', 'Nothing', 'No preference'],
+                'laptop': ['HP', 'Dell', 'Lenovo', 'ASUS', 'Acer', 'Apple', 'MSI', 'No preference'],
+                'tv': ['Samsung', 'LG', 'Sony', 'Mi', 'TCL', 'OnePlus', 'No preference'],
+                'wearable': ['Apple', 'Samsung', 'Noise', 'Boat', 'Garmin', 'Fitbit', 'No preference'],
+            }
+            brands = brand_map.get((profile.product_category or '').lower())
+            if not brands:
+                return clean_text, None
+            return clean_text, WidgetRequest(
+                widget_type='brand_picker',
+                label='Any brand preference? (pick one or more)',
+                options=brands,
             )
 
-        # Brands not specified and we have a category — show only once
-        if (
-            profile.product_category
-            and not profile.constraints.brand_preferences
-            and not session.asked_brand_widget
-            and session.socratic_turn_count >= 2
-        ):
-            brand_map = {
-                "phone": ["Samsung", "Apple", "OnePlus", "Xiaomi", "Realme", "Vivo", "Nothing", "No preference"],
-                "laptop": ["HP", "Dell", "Lenovo", "ASUS", "Acer", "Apple", "MSI", "No preference"],
-                "tv": ["Samsung", "LG", "Sony", "Mi", "TCL", "OnePlus", "No preference"],
-                "wearable": ["Apple", "Samsung", "Noise", "Boat", "Garmin", "Fitbit", "No preference"],
-            }
-            brands = brand_map.get(profile.product_category.lower(), None)
-            if brands:
-                session.asked_brand_widget = True
-                return WidgetRequest(
-                    widget_type="brand_picker",
-                    label="Any brand preference? (pick one or more)",
-                    options=brands,
-                )
+        if widget_type == 'category':
+            if profile.product_category:
+                return clean_text, None
+            return clean_text, WidgetRequest(
+                widget_type='category_picker',
+                label='What are you looking for?',
+                options=['Phone', 'Laptop', 'Tablet', 'TV', 'Wearable', 'Gaming', 'Appliance'],
+            )
 
-        return None
+        return clean_text, None
+
+    def _deduplicate_and_filter(
+        self, scored_products: list[ProductScore], session: Session
+    ) -> list[ProductScore]:
+        """Deduplicate by model base name, filter out-of-budget and already-seen products."""
+        import re
+
+        profile = session.intent_profile
+        budget_max = profile.constraints.budget_max
+        budget_min = getattr(profile.constraints, "budget_min", 0.0) or 0.0
+
+        # Normalize budget values that might be in 'k' format
+        if budget_max and 0 < budget_max < 1000:
+            budget_max = budget_max * 1000
+        if budget_min and 0 < budget_min < 1000:
+            budget_min = budget_min * 1000
+
+        # Common color names to strip
+        _COLORS = (
+            "black", "white", "blue", "red", "green", "grey", "gray", "gold",
+            "silver", "purple", "pink", "orange", "yellow", "aqua", "mint",
+            "graphite", "midnight", "starlight", "cream", "lavender", "bronze",
+            "titanium", "coral", "teal", "marble", "carbon", "glacier",
+            "siachen", "nitro", "sandy", "stellar", "geek", "aquamarine",
+            "dark", "light", "jet", "matte", "glossy",
+        )
+
+        unique: list[ProductScore] = []
+        seen_bases: set[str] = set()
+        # Also gather base names from products already in the current deck
+        for ps in session.product_deck:
+            title = ps.product.title.lower()
+            base = re.sub(r'\(.*?\)|\[.*?\]', '', title)
+            base = re.sub(r'\b(' + '|'.join(_COLORS) + r')\b', '', base)
+            base = re.sub(r'\b(\d+\s*gb|\d+\s*tb|\d+\s*mah|5g|4g|lte|wifi|wi-fi)\b', '', base)
+            base = re.sub(r'[^a-z0-9]', '', base)
+            if base:
+                seen_bases.add(base)
+
+        for ps in scored_products:
+            price = ps.product.price.current
+
+            # Strict budget filter
+            if budget_max and price > budget_max:
+                continue
+            if budget_min and price < budget_min:
+                continue
+
+            # Skip products already shown in this session
+            if ps.product.id in session.all_products_seen:
+                continue
+
+            # Normalize title to base model name
+            title = ps.product.title.lower()
+            base_name = re.sub(r'\(.*?\)|\[.*?\]', '', title)
+            base_name = re.sub(r'\b(' + '|'.join(_COLORS) + r')\b', '', base_name)
+            base_name = re.sub(r'\b(\d+\s*gb|\d+\s*tb|\d+\s*mah|5g|4g|lte|wifi|wi-fi)\b', '', base_name)
+            base_name = re.sub(r'[^a-z0-9]', '', base_name)
+
+            if base_name and base_name in seen_bases:
+                continue
+
+            if base_name:
+                seen_bases.add(base_name)
+            unique.append(ps)
+
+        # Sort by score first, then by rating for review-based tie-breaking
+        unique.sort(key=lambda s: (s.total_score, s.product.rating or 0), reverse=True)
+
+        return unique
 
     async def _fetch_and_score_products(self, session: Session) -> MessageResponse:
         """Fetch products from scrapers, score, and return recommendations."""
@@ -407,7 +525,15 @@ class Orchestrator:
 
         try:
             session.progress_steps.append("Generating search queries...")
-            products = await self._scraper.fetch_products(session.intent_profile)
+            
+            # If user swiped right on things previously, pass their names to guide the new search
+            shortlisted_titles = []
+            if hasattr(session, 'all_products_seen'):
+                for pid in session.shortlist:
+                    if pid in session.all_products_seen:
+                        shortlisted_titles.append(session.all_products_seen[pid].product.title)
+            
+            products = await self._scraper.fetch_products(session.intent_profile, shortlist=shortlisted_titles)
             session.progress_steps.append(f"Found {len(products)} products")
 
             if not products:
@@ -434,9 +560,16 @@ class Orchestrator:
 
             session.progress_steps.append("Scoring and ranking products...")
             scored_products = await self._scoring.rank_products(products, session.intent_profile)
-            session.product_deck = scored_products
+
+            unique_products = self._deduplicate_and_filter(scored_products, session)
+
+            session.product_deck = unique_products
             session.phase = SessionPhase.PRODUCT_RECOMMENDATION
             session.progress_steps.append("Done!")
+
+            # Store all products in history so conclusion can reference them
+            for ps in unique_products:
+                session.all_products_seen[ps.product.id] = ps
 
             count = len(scored_products)
             msg = f"Found {count} products matching your needs. Swipe right to shortlist, left to skip."
@@ -475,6 +608,42 @@ class Orchestrator:
 
     async def _handle_product_question(self, message: str, session: Session) -> MessageResponse:
         """Handle follow-up questions about products."""
+        # Detect swipe completion or search-more request
+        msg_lower = message.lower()
+        finish_signals = [
+            "finished shortlisting",
+            "done swiping",
+            "finished reviewing",
+            "that's all",
+            "thats all",
+            "no more",
+        ]
+        search_more_signals = [
+            "search more products",
+            "find more products",
+            "search more based",
+            "more products based",
+            "search more",
+            "find more options",
+            "different options",
+            "other options",
+        ]
+
+        # Require the message to actually contain a search/find intent
+        # to avoid casual words like "show more" or "no more" triggering re-fetch
+        _search_verbs = ("search", "find", "fetch", "get", "show", "look")
+        _product_nouns = ("product", "option", "item", "result", "phone", "laptop", "tablet")
+        has_search_verb = any(v in msg_lower for v in _search_verbs)
+        has_product_noun = any(n in msg_lower for n in _product_nouns)
+
+        if any(signal in msg_lower for signal in search_more_signals) or (has_search_verb and has_product_noun and "more" in msg_lower):
+            # User wants more products — re-fetch with refined profile
+            session.phase = SessionPhase.FETCHING_PRODUCTS
+            return await self._fetch_and_score_products(session)
+
+        if any(signal in msg_lower for signal in finish_signals):
+            return await self._generate_swipe_conclusion(session)
+
         products_context = "\n".join(
             f"- {ps.product.title} (₹{int(ps.product.price.current)}, Score: {ps.total_score})"
             for ps in session.product_deck[:5]
@@ -502,6 +671,138 @@ Give a helpful, concise answer."""
             conviction_score=session.intent_profile.conviction_score,
         )
 
+    async def _generate_swipe_conclusion(self, session: Session) -> MessageResponse:
+        """Generate a conclusion with top 3 products after swiping is complete."""
+        logger.info("generating_swipe_conclusion", session_id=session.id)
+
+        profile = session.intent_profile
+        budget = f"{int(profile.constraints.budget_max):,}" if profile.constraints.budget_max else "Not specified"
+
+        # Build a lookup of ALL products ever seen (deck retains only unswiped ones)
+        product_map: dict[str, ProductScore] = {}
+        for ps in session.product_deck:
+            product_map[ps.product.id] = ps
+        # Also check if session stored historical products (added below in handle_swipe)
+        if hasattr(session, 'all_products_seen'):
+            for pid, ps in session.all_products_seen.items():
+                if pid not in product_map:
+                    product_map[pid] = ps
+
+        # Build shortlisted and skipped product details using REAL data
+        shortlist_details = []
+        skip_details = []
+
+        for swipe in session.swipe_history:
+            ps = product_map.get(swipe.product_id)
+            if ps:
+                line = f"- {ps.product.title} (₹{int(ps.product.price.current):,}, Score: {ps.total_score})"
+            else:
+                line = f"- Product {swipe.product_id[:8]}"
+
+            if swipe.direction == "right":
+                shortlist_details.append(line)
+            else:
+                skip_details.append(f"{line} (reason: {swipe.reason or 'skipped'})")
+
+        shortlisted_text = "\n".join(shortlist_details) if shortlist_details else "None shortlisted"
+        skipped_text = "\n".join(skip_details[:10]) if skip_details else "None skipped"
+
+        # Gather ALL products with real data for ranking
+        all_candidate_scores: list[ProductScore] = []
+
+        # Shortlisted products first (from swipe history)
+        for swipe in session.swipe_history:
+            if swipe.direction == "right":
+                ps = product_map.get(swipe.product_id)
+                if ps:
+                    all_candidate_scores.append(ps)
+
+        # Add remaining deck products
+        for ps in session.product_deck:
+            if ps.product.id not in [s.product.id for s in all_candidate_scores]:
+                all_candidate_scores.append(ps)
+
+        # Sort by score descending to get genuine top 3
+        all_candidate_scores.sort(key=lambda s: s.total_score, reverse=True)
+        top_3 = all_candidate_scores[:3]
+
+        # All products text for LLM context
+        all_products_text = "\n".join(
+            f"- {ps.product.title} (₹{int(ps.product.price.current):,}, Score: {ps.total_score})"
+            for ps in all_candidate_scores[:10]
+        ) if all_candidate_scores else "No products available"
+
+        # Swipe patterns
+        skip_reasons: dict[str, int] = {}
+        for swipe in session.swipe_history:
+            if swipe.direction == "left":
+                reason = swipe.reason or "not_interested"
+                skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+
+        patterns = []
+        if skip_reasons:
+            top_reasons = sorted(skip_reasons.items(), key=lambda x: x[1], reverse=True)
+            patterns.append(f"Most common skip reasons: {', '.join(f'{r}({c}x)' for r, c in top_reasons[:3])}")
+        patterns.append(f"Total shortlisted: {len(session.shortlist)}")
+        patterns.append(f"Total skipped: {len(session.swipe_history) - len(session.shortlist)}")
+        swipe_patterns_text = "\n".join(patterns)
+
+        prompt = SWIPE_CONCLUSION_PROMPT.format(
+            primary_use_case=profile.primary_use_case or "General use",
+            product_category=profile.product_category or "Not specified",
+            budget=budget,
+            shortlisted_products=shortlisted_text,
+            skipped_products=skipped_text,
+            all_products=all_products_text,
+            swipe_patterns=swipe_patterns_text,
+        )
+
+        try:
+            result = await self._llm.generate_json(prompt, system=SWIPE_CONCLUSION_SYSTEM, max_tokens=600)
+        except Exception as e:
+            logger.warning("conclusion_generation_failed", error=str(e))
+            result = {}
+
+        # Build conclusion content using REAL product data, NOT LLM-hallucinated names
+        conclusion_text = result.get("conclusion", "Based on your preferences, here are our top recommendations.")
+
+        content_parts = [conclusion_text, ""]
+        medals = ["🥇", "🥈", "🥉"]
+        for i, ps in enumerate(top_3):
+            medal = medals[i] if i < 3 else f"#{i+1}"
+            price = int(ps.product.price.current)
+            score = ps.total_score
+            title = ps.product.title
+            # Try to get LLM reason for this product, fall back to generic
+            llm_reasons = result.get("top_products", [])
+            reason = ""
+            for lr in llm_reasons:
+                if lr.get("rank") == i + 1:
+                    reason = lr.get("reason", "")
+                    break
+            if not reason:
+                reason = "Top-ranked based on your preferences and swipe patterns"
+            content_parts.append(f"{medal} **{title}** — ₹{price:,} ({score}%)\n{reason}")
+
+        content = "\n".join(content_parts)
+
+        # Use real top 3 ProductScore objects for the conclusion
+        conclusion_product_scores = top_3
+
+        session.conversation_history.append(
+            ConversationMessage(role=MessageRole.AGENT, content=content)
+        )
+
+        return MessageResponse(
+            type="conclusion",
+            content=content,
+            intent_profile=session.intent_profile,
+            conviction_score=session.intent_profile.conviction_score,
+            conclusion_products=conclusion_product_scores,
+            can_search_more=True,
+            mode=session.mode.value,
+        )
+
     async def handle_swipe(self, session: Session, swipe: SwipeAction) -> SwipeResponse:
         """Process a swipe action and re-rank products."""
         session.swipe_history.append(swipe)
@@ -523,6 +824,12 @@ Give a helpful, concise answer."""
                 session.intent_profile,
             )
 
+        # Store product data BEFORE removing it from deck
+        for ps in session.product_deck:
+            if ps.product.id == swipe.product_id:
+                session.all_products_seen[ps.product.id] = ps
+                break
+
         session.product_deck = [
             ps for ps in session.product_deck if ps.product.id != swipe.product_id
         ]
@@ -535,14 +842,25 @@ Give a helpful, concise answer."""
         if len(session.product_deck) <= 3:
             logger.info("deck_low_refetching", remaining=len(session.product_deck))
             try:
-                new_products = await self._scraper.fetch_products(session.intent_profile)
-                existing_titles = {ps.product.title.lower()[:50] for ps in session.product_deck}
-                new_unique = [p for p in new_products if p.title.lower()[:50] not in existing_titles]
-                if new_unique:
-                    new_scored = await self._scoring.rank_products(new_unique, session.intent_profile)
-                    session.product_deck.extend(new_scored)
-                    session.product_deck.sort(key=lambda s: s.total_score, reverse=True)
-                    logger.info("deck_refilled", added=len(new_scored))
+                # Pass shortlisted titles to guide re-search
+                shortlisted_titles = [
+                    session.all_products_seen[pid].product.title
+                    for pid in session.shortlist
+                    if pid in session.all_products_seen
+                ]
+                new_products = await self._scraper.fetch_products(
+                    session.intent_profile, shortlist=shortlisted_titles
+                )
+                if new_products:
+                    new_scored = await self._scoring.rank_products(new_products, session.intent_profile)
+                    # Apply the SAME dedup + price + seen filter as initial fetch
+                    new_unique = self._deduplicate_and_filter(new_scored, session)
+                    if new_unique:
+                        session.product_deck.extend(new_unique)
+                        session.product_deck.sort(key=lambda s: s.total_score, reverse=True)
+                        for ps in new_unique:
+                            session.all_products_seen[ps.product.id] = ps
+                        logger.info("deck_refilled", added=len(new_unique))
             except Exception as e:
                 logger.warning("deck_refill_failed", error=str(e))
 

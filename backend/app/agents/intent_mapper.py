@@ -86,7 +86,7 @@ class IntentMapperAgent:
         constraints_data = data.get("constraints") or {}
         constraints = Constraint(
             budget_max=constraints_data.get("budget_max"),
-            budget_flexible=constraints_data.get("budget_flexible", True),
+            budget_flexible=constraints_data.get("budget_flexible") if constraints_data.get("budget_flexible") is not None else True,
             brand_preferences=constraints_data.get("brand_preferences") or [],
             brand_aversions=constraints_data.get("brand_aversions") or [],
         )
@@ -114,4 +114,52 @@ class IntentMapperAgent:
             if existing.conviction_score > profile.conviction_score:
                 profile.conviction_score = existing.conviction_score
 
+        # Filter out ambiguities that are already resolved
+        profile.ambiguities = self._filter_resolved_ambiguities(profile)
+
         return profile
+
+    @staticmethod
+    def _filter_resolved_ambiguities(profile: IntentProfile) -> list[str]:
+        """Remove ambiguities for fields that already have values."""
+        resolved_keywords: list[tuple[bool, list[str]]] = [
+            (
+                profile.constraints.budget_max is not None,
+                ["budget", "price", "cost", "spend", "afford", "range"],
+            ),
+            (
+                bool(profile.product_category),
+                ["category", "type of product", "looking for", "phone or laptop"],
+            ),
+            (
+                bool(profile.constraints.brand_preferences),
+                ["brand", "manufacturer", "prefer.*brand"],
+            ),
+            (
+                bool(profile.primary_use_case and profile.primary_use_case != "general"),
+                ["use case", "purpose", "primary use", "main use"],
+            ),
+        ]
+
+        filtered: list[str] = []
+        for ambiguity in profile.ambiguities:
+            amb_lower = ambiguity.lower()
+            skip = False
+            for is_resolved, keywords in resolved_keywords:
+                if is_resolved and any(kw in amb_lower for kw in keywords):
+                    skip = True
+                    break
+            if not skip:
+                filtered.append(ambiguity)
+
+        # If category, use case, and budget are all known, keep only truly critical items
+        core_known = (
+            bool(profile.product_category)
+            and bool(profile.primary_use_case and profile.primary_use_case != "general")
+            and profile.constraints.budget_max is not None
+        )
+        if core_known:
+            # Only keep ambiguities that are genuinely blocking (max 1)
+            filtered = filtered[:1]
+
+        return filtered

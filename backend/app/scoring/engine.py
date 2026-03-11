@@ -73,22 +73,65 @@ class ScoringEngine:
             weight = req.weight
             total_weight += weight
 
-            # Check if product has this spec
-            spec_value = product.specifications.get(req.name, "")
+            # Build the target value the user wants (prefer min_value, fall back to preferred_value)
+            target = (req.min_value or req.preferred_value or "").lower().strip()
 
-            if spec_value:
-                # Product has the spec — give full match
-                score += 100 * weight
-            elif req.required:
-                # Required spec missing — penalty
-                score += 0
+            # Look for matching spec in product (try exact key, then fuzzy key match)
+            spec_value = ""
+            req_name_lower = req.name.lower()
+            for key, val in product.specifications.items():
+                if key.lower() == req_name_lower:
+                    spec_value = str(val).lower().strip()
+                    break
+
+            # Also search the title for spec mentions (e.g. "Snapdragon" in the title)
+            title_lower = product.title.lower()
+
+            if not spec_value and not target:
+                # No target and no spec — neutral
+                score += 50 * weight
+            elif not spec_value:
+                # Product doesn't have this spec listed — check title as fallback
+                if target and target in title_lower:
+                    score += 90 * weight  # Found in title
+                elif req.required:
+                    score += 0  # Required spec completely missing
+                else:
+                    score += 20 * weight  # Optional, missing
+            elif not target:
+                # Spec exists but user didn't specify a value — full match
+                score += 80 * weight
             else:
-                # Optional spec missing — partial score
-                score += 30 * weight
+                # Both target and spec exist — compare values
+                if target in spec_value or spec_value in target:
+                    # Direct substring match (e.g. "snapdragon" in "snapdragon 6s gen 4")
+                    score += 100 * weight
+                elif self._fuzzy_spec_match(target, spec_value, title_lower):
+                    # Fuzzy match (partial keyword overlap)
+                    score += 70 * weight
+                elif req.required:
+                    # Required spec exists but value doesn't match at all
+                    score += 5 * weight  # Near-zero — wrong value
+                else:
+                    # Optional spec, no match
+                    score += 25 * weight
 
         if total_weight > 0:
-            return (score / total_weight)
+            return score / total_weight
         return 50  # Default baseline
+
+    @staticmethod
+    def _fuzzy_spec_match(target: str, spec_value: str, title: str) -> bool:
+        """Check if the target requirement is satisfied by spec value or product title."""
+        # Extract significant words (3+ chars) from the target
+        target_words = [w for w in target.split() if len(w) >= 3]
+        if not target_words:
+            return False
+
+        combined = f"{spec_value} {title}"
+        # If majority of target words appear, it's a fuzzy match
+        matches = sum(1 for w in target_words if w in combined)
+        return matches >= len(target_words) * 0.5
 
     def _calculate_sentiment_score(self, product: Product) -> float:
         """Calculate sentiment score (0-100) from aggregated reviews."""
@@ -159,12 +202,18 @@ class ScoringEngine:
     def _has_deal_breakers(self, product: Product, profile: IntentProfile) -> bool:
         """Check if product hits any deal-breaker criteria."""
         price = product.price.current
-        budget = profile.constraints.budget_max
-        if budget is not None and 0 < budget < 1000:
-            budget *= 1000  # Handle '25k' parsed as 25
+        budget_max = profile.constraints.budget_max
+        if budget_max is not None and 0 < budget_max < 1000:
+            budget_max *= 1000  # Handle '25k' parsed as 25
 
-        # Way over budget (>50% over)
-        if budget and price > budget * 1.5:
+        budget_min = getattr(profile.constraints, "budget_min", 0.0)
+        if budget_min is not None and 0 < budget_min < 1000:
+            budget_min *= 1000
+
+        # Strictly over budget (no more 50% leniency) or under min budget
+        if budget_max and price > budget_max:
+            return True
+        if budget_min and price < budget_min:
             return True
 
         # Brand aversion
@@ -172,6 +221,49 @@ class ScoringEngine:
             for brand in profile.constraints.brand_aversions:
                 if brand.lower() in product.brand.lower():
                     return True
+
+        # Required technical requirements not met
+        title_lower = product.title.lower()
+        specs_text = " ".join(str(v).lower() for v in product.specifications.values())
+
+        # Qualitative terms that the LLM might extract as requirement values
+        # but can never be matched against scraped product specs
+        _QUALITATIVE_SKIP = {
+            "long_lasting", "long lasting", "good", "best", "high", "low",
+            "fast", "slow", "big", "large", "small", "medium", "durable",
+            "scratch_resistant", "scratch resistant", "waterproof", "water_resistant",
+            "premium", "budget", "affordable", "flagship", "mid_range",
+            "everyday", "everyday_use", "general", "basic",
+            "upi", "nfc", "upi/nfc", "upi/nfc support", "nfc support",
+            "simple", "simple interface", "easy to use", "user friendly",
+            "smooth", "lag free", "lag_free", "lagfree", "snappy",
+            "loud", "clear", "bright", "sharp", "vivid",
+            "reliable", "sturdy", "rugged", "tough",
+            "compact", "lightweight", "portable", "slim",
+        }
+
+        for req in profile.technical_requirements:
+            if not req.required:
+                continue
+            target = (req.min_value or req.preferred_value or "").lower().strip()
+            if not target:
+                continue
+
+            # Skip qualitative/vague targets that can't be matched against specs
+            if target in _QUALITATIVE_SKIP or any(q in target for q in _QUALITATIVE_SKIP):
+                continue
+
+            # Check if the required value appears in specs or title
+            found = target in specs_text or target in title_lower
+
+            if not found:
+                logger.info(
+                    "deal_breaker_missing_req",
+                    product=product.title[:60],
+                    requirement=req.name,
+                    target=target,
+                )
+                return True
 
         return False
 

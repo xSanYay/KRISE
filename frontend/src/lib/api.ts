@@ -95,7 +95,7 @@ export interface DecisionOutcome {
 }
 
 export interface MessageResponse {
-    type: 'question' | 'recommendations' | 'info' | 'error'
+    type: 'question' | 'recommendations' | 'info' | 'error' | 'conclusion'
     content: string
     intent_profile: IntentProfile | null
     products: ProductScore[]
@@ -107,6 +107,8 @@ export interface MessageResponse {
     max_turns: number
     completed: boolean
     decision_outcome?: DecisionOutcome | null
+    conclusion_products?: ProductScore[]
+    can_search_more?: boolean
 }
 
 export interface ProfileResponse {
@@ -135,7 +137,7 @@ export async function createSession(language: string = 'en', mode: SessionMode =
 
 export async function sendMessage(sessionId: string, content: string): Promise<MessageResponse> {
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 45000)
+    const timeoutId = setTimeout(() => controller.abort(), 90000)
     try {
         const res = await fetch(`${API_BASE}/sessions/${sessionId}/message`, {
             method: 'POST',

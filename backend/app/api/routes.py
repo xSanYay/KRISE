@@ -77,7 +77,21 @@ async def get_intent_profile(session_id: str):
     """Get the current intent profile for a session."""
     session = get_session(session_id)
     if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+        # Return empty profile for stale sessions (e.g., after server restart)
+        return {
+            "session_id": session_id,
+            "mode": "standard",
+            "phase": "idle",
+            "initial_statement": "",
+            "intent_profile": {},
+            "conviction_score": 0,
+            "socratic_turns": 0,
+            "decision_turns": 0,
+            "decision_stage": "opening",
+            "decision_complete": False,
+            "decision_outcome": None,
+            "progress_steps": [],
+        }
 
     return {
         "session_id": session_id,

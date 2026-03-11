@@ -40,16 +40,14 @@ class SocraticFrictionAgent:
     """Generates clarification questions to understand user needs."""
 
     _DECISION_STAGES = [
-        ("opening", "Clarify the actual decision and force the user to explain why one option is pulling them."),
-        ("clarify", "Tighten the real use case, constraints, and must-have outcomes."),
-        ("challenge", "Stress-test whether the user is chasing features they will not use."),
-        ("tradeoff", "Force a direct tradeoff between convenience, performance, battery, price, or ecosystem."),
-        ("suggest", "Offer a sharper framing of the decision, then probe whether it actually matches their priorities."),
-        ("clarify", "Resolve contradictions or vague priorities that still remain."),
-        ("challenge", "Check whether identity, hype, or fear of missing out is distorting the choice."),
-        ("tradeoff", "Make them choose what they are explicitly willing to lose."),
-        ("suggest", "Test a narrowed recommendation or wait strategy before final verdict."),
-        ("conclude", "Prepare to conclude with a verdict and next step."),
+        ("discover", "Ask what's pulling them toward each option. Use their words, not spec sheets."),
+        ("discover", "Dig into the core tension: price vs feature, ecosystem vs accuracy, etc."),
+        ("tradeoff", "Force the user to choose: reference what they said and ask which matters MORE."),
+        ("tradeoff", "If they're still torn, frame it as a direct either/or using their own stated priorities."),
+        ("decide", "Summarize what they've said and ask: based on all this, which way are you leaning?"),
+        ("decide", "If still undecided, give them the final framing and conclude."),
+        ("conclude", "Conclude the session with a verdict."),
+        ("conclude", "Final conclusion."),
     ]
 
     def __init__(self, llm: LLMProvider, web_searcher: WebSearcher | None = None):
@@ -104,6 +102,62 @@ class SocraticFrictionAgent:
             return ""
         context = "Current web findings:\n" + "\n".join(bullets)
         logger.info("web_context_fetched", subject=subject, hits=len(bullets))
+        return context
+
+    async def fetch_decision_facts(
+        self,
+        initial_statement: str,
+        intent_profile: IntentProfile,
+    ) -> str:
+        """Upfront DDG search for all products named in the initial decision statement.
+
+        Runs once at the start of a Socratic decision session and returns verified
+        facts (OS, key specs, price range, known issues) so the LLM never has to
+        ask about things it should already know from search results.
+        """
+        if self._searcher is None:
+            return ""
+
+        # Extract all product mentions from the initial statement
+        matches = _PRODUCT_PATTERN.findall(initial_statement)
+        product_terms = list(dict.fromkeys(m[0] if isinstance(m, tuple) else m for m in matches))
+
+        category = intent_profile.product_category or ""
+        if not product_terms:
+            # Fall back to category + initial statement keywords
+            words = [w for w in initial_statement.split() if len(w) > 4]
+            product_terms = words[:3]
+
+        if not product_terms:
+            return ""
+
+        # Build a comparison query covering all mentioned products
+        query_subject = " vs ".join(product_terms[:3])
+        if category:
+            query_subject = f"{query_subject} {category}"
+        query = f"{query_subject} specs OS features India 2024 2025"
+
+        try:
+            results = await self._searcher.fact_check(query_subject, max_results=6)
+        except Exception as e:
+            logger.warning("decision_facts_fetch_failed", error=str(e))
+            return ""
+
+        if not results:
+            return ""
+
+        bullets = []
+        for r in results[:5]:
+            snippet = r.get("snippet", "").strip()
+            title = r.get("title", "").strip()
+            if snippet:
+                bullets.append(f"- {title}: {snippet}")
+
+        if not bullets:
+            return ""
+
+        context = f"Verified facts about: {query_subject}\n" + "\n".join(bullets)
+        logger.info("decision_facts_fetched", subject=query_subject, hits=len(bullets))
         return context
 
     async def generate_question(
@@ -190,6 +244,7 @@ class SocraticFrictionAgent:
         intent_profile: IntentProfile,
         conversation_history: list[ConversationMessage],
         initial_statement: str,
+        decision_facts: str,
         turn_number: int,
         max_turns: int,
     ) -> dict[str, str | bool]:
@@ -207,7 +262,8 @@ class SocraticFrictionAgent:
         brand_preferences = ", ".join(intent_profile.constraints.brand_preferences) or "None specified"
         ambiguities = ", ".join(intent_profile.ambiguities[:4]) or "None identified"
 
-        web_context = await self._fetch_web_context(conversation_history, intent_profile)
+        live_context = await self._fetch_web_context(conversation_history, intent_profile)
+        web_context = "\n".join([decision_facts, live_context]).strip()
 
         prompt = DECISION_SOCRATIC_TURN_PROMPT.format(
             turn_number=turn_number,

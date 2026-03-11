@@ -59,6 +59,8 @@ class MessageResponse(BaseModel):
     max_turns: int = 0
     completed: bool = False
     decision_outcome: Optional[DecisionOutcome] = None
+    conclusion_products: list[ProductScore] = Field(default_factory=list)
+    can_search_more: bool = False
 
 
 class SwipeResponse(BaseModel):

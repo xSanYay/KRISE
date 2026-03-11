@@ -47,6 +47,9 @@ export const useSessionStore = defineStore('session', () => {
     const decisionStage = ref('opening')
     const decisionComplete = ref(false)
     const decisionOutcome = ref<DecisionOutcome | null>(null)
+    const conclusionProducts = ref<ProductScore[]>([])
+    const conclusionText = ref('')
+    const canSearchMore = ref(false)
 
     const hasProducts = computed(() => products.value.length > 0)
     const isDecisionMode = computed(() => mode.value === 'socratic_decision')
@@ -65,6 +68,9 @@ export const useSessionStore = defineStore('session', () => {
         decisionStage.value = 'opening'
         decisionComplete.value = false
         decisionOutcome.value = null
+        conclusionProducts.value = []
+        conclusionText.value = ''
+        canSearchMore.value = false
     }
 
     async function startSession(language: string = 'en', sessionMode: SessionMode = 'standard') {
@@ -153,6 +159,16 @@ export const useSessionStore = defineStore('session', () => {
 
             if (res.type === 'recommendations' && res.products.length > 0) {
                 products.value = res.products
+                phase.value = 'product_recommendation'
+                // Reset conclusion when new products arrive
+                conclusionProducts.value = []
+                conclusionText.value = ''
+                canSearchMore.value = false
+            } else if (res.type === 'conclusion') {
+                // Handle conclusion response
+                conclusionProducts.value = res.conclusion_products || []
+                conclusionText.value = res.content
+                canSearchMore.value = res.can_search_more || false
                 phase.value = 'product_recommendation'
             } else if (res.type === 'question') {
                 phase.value = 'socratic_friction'
@@ -252,6 +268,9 @@ export const useSessionStore = defineStore('session', () => {
         decisionComplete,
         decisionOutcome,
         isDecisionMode,
+        conclusionProducts,
+        conclusionText,
+        canSearchMore,
         startSession,
         sendMessage,
         submitInitialStatement,

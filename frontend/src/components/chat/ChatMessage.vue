@@ -14,32 +14,32 @@
         <!-- Budget Slider with Manual Input -->
         <div v-if="msg.widget.widget_type === 'budget_slider'" class="widget budget-widget">
           <label class="widget-label">{{ msg.widget.label }}</label>
-          <div class="slider-row">
-            <span class="slider-min">₹{{ formatNum(msg.widget.min_value || 5000) }}</span>
-            <input
-              type="range"
-              :min="msg.widget.min_value || 5000"
-              :max="msg.widget.max_value || 200000"
-              :step="msg.widget.step || 1000"
-              v-model.number="sliderValue"
-              class="budget-slider"
-            />
-            <span class="slider-max">₹{{ formatNum(msg.widget.max_value || 200000) }}</span>
+          <div class="budget-input-row" style="display: flex; align-items: center; gap: 8px;">
+            <div class="budget-input-group" style="flex: 1; display: flex; align-items: center; gap: 4px;">
+              <span class="budget-currency">₹</span>
+              <input
+                type="number"
+                v-model.number="minBudget"
+                min="0"
+                class="budget-text-input"
+                placeholder="Min"
+                @focus="($event.target as HTMLInputElement).select()"
+              />
+            </div>
+            <span style="color: var(--text-muted); font-size: 13px;">to</span>
+            <div class="budget-input-group" style="flex: 1; display: flex; align-items: center; gap: 4px;">
+              <span class="budget-currency">₹</span>
+              <input
+                type="number"
+                v-model.number="maxBudget"
+                class="budget-text-input"
+                placeholder="Max"
+                @focus="($event.target as HTMLInputElement).select()"
+                @keydown.enter="submitBudgetWidget"
+              />
+            </div>
           </div>
-          <div class="budget-input-row">
-            <span class="budget-currency">₹</span>
-            <input
-              type="number"
-              v-model.number="sliderValue"
-              :min="msg.widget.min_value || 5000"
-              :max="msg.widget.max_value || 200000"
-              :step="msg.widget.step || 1000"
-              class="budget-text-input"
-              @focus="($event.target as HTMLInputElement).select()"
-              @keydown.enter="submitWidget(`My budget is ₹${sliderValue}`)"
-            />
-          </div>
-          <button class="btn btn-primary btn-sm" @click="submitWidget(`My budget is ₹${sliderValue}`)">
+          <button class="btn btn-primary btn-sm" @click="submitBudgetWidget">
             Set Budget
           </button>
         </div>
@@ -114,11 +114,14 @@ const emit = defineEmits<{
   widgetSubmit: [value: string]
 }>()
 
-const sliderValue = ref(
-  props.msg.widget
-    ? Math.round(((props.msg.widget.min_value ?? 5000) + (props.msg.widget.max_value ?? 200000)) / 2 / 1000) * 1000
-    : 20000
+const minBudget = ref(0)
+const maxBudget = ref(
+  props.msg.widget?.max_value || 200000
 )
+
+function submitBudgetWidget() {
+  submitWidget(`My budget is between ₹${minBudget.value} and ₹${maxBudget.value}`)
+}
 const widgetUsed = ref(false)
 const selectedBrands = ref<string[]>([])
 
@@ -134,9 +137,6 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-function formatNum(n: number): string {
-  return Number(n).toLocaleString('en-IN')
-}
 
 function toggleBrand(brand: string) {
   if (brand === 'No preference') {

@@ -16,9 +16,10 @@ class TechnicalRequirement(BaseModel):
 
 class Constraint(BaseModel):
     """Budget, brand, or other constraints."""
+    budget_min: Optional[float] = 0.0
     budget_max: Optional[float] = None
     budget_currency: str = "INR"
-    budget_flexible: bool = True
+    budget_flexible: Optional[bool] = True
     brand_preferences: list[str] = Field(default_factory=list)
     brand_aversions: list[str] = Field(default_factory=list)
     max_weight_kg: Optional[float] = None

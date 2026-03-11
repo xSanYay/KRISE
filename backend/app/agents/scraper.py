@@ -33,10 +33,10 @@ class ScraperAgent:
         self._flipkart = FlipkartScraper()
         self._web_search = WebSearcher()
 
-    async def fetch_products(self, intent_profile: IntentProfile) -> list[Product]:
-        """Fetch products from all sources based on intent profile."""
+    async def fetch_products(self, intent_profile: IntentProfile, shortlist: list[str] = None) -> list[Product]:
+        """Fetch products from all sources based on intent profile and shortlist."""
         # Generate search queries using LLM
-        queries = await self._generate_search_queries(intent_profile)
+        queries = await self._generate_search_queries(intent_profile, shortlist)
 
         if not queries:
             queries = [f"{intent_profile.primary_use_case} {intent_profile.product_category}"]
@@ -87,9 +87,10 @@ class ScraperAgent:
         # Deduplicate by title similarity
         unique_products = self._deduplicate(all_products)
 
-        # Fetch sentiment for top products (limit to 5 for an optimized, curated list)
+        # Fetch sentiment for top products (limit to 12 for deck size)
+        sentiment_limit = min(len(unique_products), 12)
         sentiment_tasks = [
-            self._fetch_sentiment(p, intent_profile) for p in unique_products[:5]
+            self._fetch_sentiment(p, intent_profile) for p in unique_products[:sentiment_limit]
         ]
         products_with_sentiment = await asyncio.gather(*sentiment_tasks, return_exceptions=True)
 
@@ -98,14 +99,22 @@ class ScraperAgent:
             if isinstance(result, Product):
                 final_products.append(result)
 
+        # Include remaining products beyond sentiment limit (with default sentiment)
+        for p in unique_products[sentiment_limit:]:
+            final_products.append(p)
+
         logger.info("scraping_complete", total_products=len(final_products))
         return final_products
 
-    async def _generate_search_queries(self, profile: IntentProfile) -> list[str]:
+    async def _generate_search_queries(self, profile: IntentProfile, shortlist: list[str] = None) -> list[str]:
         """Use LLM to generate optimal search queries."""
-        reqs = ", ".join(r.name for r in profile.technical_requirements[:5])
+        reqs = ", ".join(
+            f"{r.name}: {r.min_value or r.preferred_value}" if (r.min_value or r.preferred_value) else r.name
+            for r in profile.technical_requirements[:5]
+        )
         budget = str(int(profile.constraints.budget_max)) if profile.constraints.budget_max else "any"
         brands = ", ".join(profile.constraints.brand_preferences) if profile.constraints.brand_preferences else "any"
+        shortlist_str = ", ".join(shortlist) if shortlist else "None"
 
         prompt = PRODUCT_SEARCH_QUERY_PROMPT.format(
             primary_use_case=profile.primary_use_case,
@@ -113,6 +122,7 @@ class ScraperAgent:
             budget_max=budget,
             requirements=reqs or "general purpose",
             brand_preferences=brands,
+            shortlist=shortlist_str,
         )
 
         result = await self._llm.generate_json(prompt, max_tokens=200)
@@ -128,7 +138,10 @@ class ScraperAgent:
 
     async def _generate_products_from_llm(self, profile: IntentProfile) -> list[Product]:
         """Last-resort fallback: ask the LLM to generate real product suggestions from its training knowledge."""
-        reqs = ", ".join(r.name for r in profile.technical_requirements[:6]) or "general purpose"
+        reqs = ", ".join(
+            f"{r.name}: {r.min_value or r.preferred_value}" if (r.min_value or r.preferred_value) else r.name
+            for r in profile.technical_requirements[:6]
+        ) or "general purpose"
         budget = str(int(profile.constraints.budget_max)) if profile.constraints.budget_max else "50000"
         brands = ", ".join(profile.constraints.brand_preferences) if profile.constraints.brand_preferences else "no preference"
         secondary = ", ".join(profile.secondary_use_cases[:3]) if profile.secondary_use_cases else "none"

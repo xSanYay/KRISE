@@ -42,6 +42,11 @@
                 <span class="step-text">{{ step }}</span>
               </div>
             </div>
+            <!-- Product count floating badge -->
+            <div v-if="foundProductCount > 0" class="product-count-badge animate-fade-in">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a4 4 0 0 0-8 0v2"/></svg>
+              <span>{{ foundProductCount }} products found</span>
+            </div>
           </div>
           <div v-else class="search-progress">
             <div class="search-progress-steps">
@@ -110,6 +115,48 @@
             :shortlist-count="sessionStore.shortlist.length"
             @swipe="handleProductSwipe"
           />
+        </div>
+      </div>
+
+      <!-- Conclusion Overlay (replaces products after swiping is done) -->
+      <div v-if="showConclusion" class="conclusion-overlay animate-slide-up">
+        <div class="conclusion-header">
+          <h2 class="overlay-title">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+            Your Top Recommendations
+          </h2>
+          <button class="btn btn-ghost close-overlay-btn" @click="dismissConclusion">
+            Back to Chat
+          </button>
+        </div>
+        <div class="conclusion-content">
+          <div class="conclusion-cards">
+            <div v-for="(ps, i) in sessionStore.conclusionProducts" :key="ps.product.id" class="conclusion-product-card" :class="`rank-${i + 1}`">
+              <div class="rank-badge">
+                <span v-if="i === 0">🥇</span>
+                <span v-else-if="i === 1">🥈</span>
+                <span v-else>🥉</span>
+              </div>
+              <div class="conclusion-product-info">
+                <h3>{{ ps.product.title }}</h3>
+                <div class="conclusion-product-meta">
+                  <span class="conclusion-price">₹{{ Number(ps.product.price.current).toLocaleString('en-IN') }}</span>
+                  <span class="conclusion-score">Score: {{ Math.round(ps.total_score) }}%</span>
+                </div>
+                <div class="suitability-bar">
+                  <div class="suitability-fill" :style="{ width: ps.total_score + '%' }"></div>
+                </div>
+                <p class="conclusion-explanation">{{ ps.explanation }}</p>
+              </div>
+            </div>
+          </div>
+          <div class="conclusion-actions">
+            <button class="btn btn-primary btn-lg shadow-glow" @click="searchMoreProducts">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+              Search More Products
+            </button>
+            <p class="conclusion-hint">Based on your refined preferences from swiping</p>
+          </div>
         </div>
       </div>
 
@@ -368,8 +415,17 @@ const isInputDisabled = computed(() => {
 })
 
 const progressLabel = computed(() => {
+  if (sessionStore.isDecisionMode) return 'Analyzing your reasoning...'
   if (sessionStore.convictionScore >= 0.7) return 'Searching products and building recommendations...'
   return 'Understanding your needs...'
+})
+
+const foundProductCount = computed(() => {
+  for (const step of sessionStore.progressSteps) {
+    const match = step.match(/Found (\d+) products/)
+    if (match && match[1]) return parseInt(match[1], 10)
+  }
+  return 0
 })
 
 const convictionColor = computed(() => {
@@ -437,6 +493,22 @@ function handleWidgetSubmit(value: string) {
 
 function handleProductSwipe(productId: string, direction: string, reason?: string) {
   sessionStore.handleSwipe(productId, direction, reason)
+}
+
+const showConclusion = computed(() => {
+  return sessionStore.conclusionProducts.length > 0 && !sessionStore.hasProducts && !conclusionDismissed.value
+})
+
+const conclusionDismissed = ref(false)
+
+function dismissConclusion() {
+  conclusionDismissed.value = true
+}
+
+function searchMoreProducts() {
+  // Dismiss the overlay first — user goes back to chat immediately
+  conclusionDismissed.value = true
+  sessionStore.sendMessage('Search more products based on my preferences')
 }
 
 // Auto-scroll to bottom
@@ -757,6 +829,27 @@ watch(
   100% { opacity: 1; transform: scale(1.2); }
 }
 
+.product-count-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  color: #34d399;
+  font-size: 12px;
+  font-weight: 600;
+  width: fit-content;
+  animation: badge-pulse 2s ease-in-out infinite;
+}
+
+@keyframes badge-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.2); }
+  50% { box-shadow: 0 0 8px 2px rgba(16, 185, 129, 0.15); }
+}
+
 /* Side panel */
 .side-panel {
   width: 440px;
@@ -1035,5 +1128,151 @@ watch(
   .decision-onboarding-copy h3 {
     font-size: 26px;
   }
+}
+
+/* Conclusion Overlay */
+.conclusion-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(5, 5, 5, 0.92);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+}
+
+.conclusion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 32px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.conclusion-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+}
+
+.conclusion-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 560px;
+}
+
+.conclusion-product-card {
+  display: flex;
+  gap: 16px;
+  padding: 20px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-color);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.conclusion-product-card.rank-1 {
+  border-color: rgba(255, 215, 0, 0.25);
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.06), rgba(255, 215, 0, 0.01));
+}
+
+.conclusion-product-card.rank-2 {
+  border-color: rgba(192, 192, 192, 0.2);
+}
+
+.conclusion-product-card.rank-3 {
+  border-color: rgba(205, 127, 50, 0.2);
+}
+
+.rank-badge {
+  font-size: 32px;
+  line-height: 1;
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  padding-top: 4px;
+}
+
+.conclusion-product-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.conclusion-product-info h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  line-height: 1.3;
+}
+
+.conclusion-product-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.conclusion-price {
+  font-family: 'Outfit', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  color: #10b981;
+}
+
+.conclusion-score {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.suitability-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  margin-bottom: 8px;
+}
+
+.suitability-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #10b981, #34d399);
+  transition: width 0.6s ease;
+}
+
+.conclusion-explanation {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.conclusion-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.conclusion-actions .btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.conclusion-hint {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 </style>

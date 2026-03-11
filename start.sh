@@ -103,7 +103,7 @@ cleanup_port 5173
 
 # Start Backend
 echo "Starting Backend Server (Port $APP_PORT)..."
-bash -c 'cd "$1/backend" && "$2" -m uvicorn app.main:app --reload --host "$3" --port "$4"' _ "$SCRIPT_DIR" "$VENV_PYTHON" "$APP_HOST" "$APP_PORT" &
+bash -c 'cd "$1/backend" && "$2" -m uvicorn app.main:app --host "$3" --port "$4"' _ "$SCRIPT_DIR" "$VENV_PYTHON" "$APP_HOST" "$APP_PORT" &
 BACKEND_PID=$!
 
 echo "Starting Frontend Server (Port 5173)..."

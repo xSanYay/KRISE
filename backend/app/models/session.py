@@ -66,10 +66,12 @@ class Session(BaseModel):
     asked_brand_widget: bool = False
     asked_budget_widget: bool = False
     initial_statement: str = ""
+    decision_facts: str = ""
     decision_turn_count: int = 0
     decision_stage: str = "opening"
     decision_complete: bool = False
     decision_outcome: Optional[DecisionOutcome] = None
     progress_steps: list[str] = Field(default_factory=list)
+    all_products_seen: dict[str, ProductScore] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

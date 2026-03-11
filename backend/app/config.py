@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     aws_access_key_id: str = ""
     aws_secret_access_key: str = ""
     aws_default_region: str = "us-east-1"
-    bedrock_model_id: str = "amazon.nova-lite-v1:0"
+    bedrock_model_id: str = "us.amazon.nova-premier-v1:0"
     
     # Google Gemini
     gemini_api_key: str = ""
@@ -39,17 +39,17 @@ class Settings(BaseSettings):
     # CORS
     frontend_url: str = "http://localhost:5173"
     cors_allow_origins: str = ""
-    cors_allow_origin_regex: str = ""
+    cors_allow_origin_regex: str = "^https://.*\\.app\\.github\\.dev$|^https://.*\\.cloudfront\\.net$"
 
     # Scraping
     scraping_delay_min: float = 1.0
     scraping_delay_max: float = 3.0
-    scraping_max_products: int = 15
+    scraping_max_products: int = 20
 
     # Agent thresholds
-    conviction_threshold: float = 0.80
-    max_socratic_turns: int = 2
-    decision_max_turns: int = 10
+    conviction_threshold: float = 0.85
+    max_socratic_turns: int = 6
+    decision_max_turns: int = 8
     decision_min_turns_before_conclusion: int = 3
     decision_conclusion_threshold: float = 0.85
 
@@ -62,7 +62,12 @@ class Settings(BaseSettings):
             origins.append(self.frontend_url)
 
         if not origins:
-            origins = ["http://localhost:5173", "http://localhost:3000"]
+            origins = [
+                "http://localhost:5173",
+                "http://localhost:3000",
+                "http://krise-frontend-571944666798.s3-website-us-east-1.amazonaws.com",
+                "https://yarnm75uey.us-east-1.awsapprunner.com",
+            ]
 
         return origins
 
